@@ -59,12 +59,24 @@ app.get('/api/stats', async (req, res) => {
     const lastSync = await getSetting('drive_last_sync');
     const lastFileName = await getSetting('drive_file_name');
 
+    // Get all distinct tags across words
+    const tagsRows = await query(`
+      SELECT DISTINCT tags FROM words WHERE active = 1 AND tags IS NOT NULL AND tags != ''
+    `);
+    const allTags = new Set();
+    for (const row of tagsRows) {
+      if (row.tags) {
+        row.tags.split(';').map(t => t.trim()).filter(Boolean).forEach(t => allTags.add(t));
+      }
+    }
+
     res.json({
       success: true,
       totals: totalWords,
       due: dueWords,
       states: stateStats,
       totalReviews: reviewsCount[0]?.total || 0,
+      tags: Array.from(allTags).sort(),
       lastSync,
       lastFileName
     });
@@ -134,7 +146,7 @@ app.get('/api/words', async (req, res) => {
 // 3. Due study cards for session
 app.get('/api/study/due', async (req, res) => {
   try {
-    const { lang, limit = 30 } = req.query;
+    const { lang, tag, limit = 30 } = req.query;
     const nowIso = new Date().toISOString();
 
     const conditions = ['w.active = 1', 'c.due <= ?'];
@@ -143,6 +155,11 @@ app.get('/api/study/due', async (req, res) => {
     if (lang && lang !== 'all') {
       conditions.push('w.lang = ?');
       params.push(lang.toLowerCase());
+    }
+
+    if (tag) {
+      conditions.push('w.tags LIKE ?');
+      params.push(`%${tag}%`);
     }
 
     let cards = await query(`
@@ -163,6 +180,11 @@ app.get('/api/study/due', async (req, res) => {
       if (lang && lang !== 'all') {
         newConditions.push('w.lang = ?');
         newParams.push(lang.toLowerCase());
+      }
+
+      if (tag) {
+        newConditions.push('w.tags LIKE ?');
+        newParams.push(`%${tag}%`);
       }
 
       const existingIds = cards.map(c => c.id);

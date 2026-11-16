@@ -6,7 +6,10 @@ const STATE = {
   studyCards: [],
   currentCardIndex: 0,
   cardRevealed: false,
-  studyLang: 'all',
+  studyLang: null, // null: must select language/tag first
+  studyTag: '',    // optional tag filter
+  isListening: false,
+  pronunciationResult: null,
   wordsList: [],
   wordsTotal: 0,
   wordsPage: 1,
@@ -29,6 +32,85 @@ const LANGS = {
   it: { name: 'Italiano', code: 'it-IT', youglish: 'italian' },
   pt: { name: 'Portugués', code: 'pt-BR', youglish: 'portuguese' }
 };
+
+// Voice Recognition & Pronunciation Evaluator
+function evaluatePronunciation(targetWord, spokenText) {
+  const cleanTarget = targetWord.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()?"']/g, '').trim();
+  const cleanSpoken = spokenText.toLowerCase().replace(/[.,/#!$%^&*;:{}=\-_`~()?"']/g, '').trim();
+
+  if (cleanTarget === cleanSpoken) {
+    return { score: 100, label: '¡Perfecto! 🎯', color: '#10b981', spoken: spokenText };
+  }
+
+  // Levenshtein distance for similarity ratio
+  const lenT = cleanTarget.length;
+  const lenS = cleanSpoken.length;
+  const matrix = Array.from({ length: lenT + 1 }, () => Array(lenS + 1).fill(0));
+
+  for (let i = 0; i <= lenT; i++) matrix[i][0] = i;
+  for (let j = 0; j <= lenS; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= lenT; i++) {
+    for (let j = 1; j <= lenS; j++) {
+      const cost = cleanTarget[i - 1] === cleanSpoken[j - 1] ? 0 : 1;
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1,
+        matrix[i][j - 1] + 1,
+        matrix[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  const distance = matrix[lenT][lenS];
+  const maxLen = Math.max(lenT, lenS);
+  const score = Math.max(0, Math.round(((maxLen - distance) / maxLen) * 100));
+
+  if (score >= 85) {
+    return { score, label: '¡Muy bien pronunciado! ✨', color: '#34d399', spoken: spokenText };
+  } else if (score >= 60) {
+    return { score, label: 'Cerca, pero revisa la dicción ⚠️', color: '#fbbf24', spoken: spokenText };
+  } else {
+    return { score, label: 'Necesitas practicarla un poco más ❌', color: '#f87171', spoken: spokenText };
+  }
+}
+
+function startSpeechRecognition(targetWord, lang) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    notify('Tu navegador no soporta reconocimiento de voz (prueba en Chrome o Edge)', 'error');
+    return;
+  }
+
+  STATE.isListening = true;
+  STATE.pronunciationResult = null;
+  renderApp();
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = LANGS[lang]?.code || 'en-US';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  recognition.onresult = (event) => {
+    const spoken = event.results[0][0].transcript;
+    STATE.pronunciationResult = evaluatePronunciation(targetWord, spoken);
+    STATE.isListening = false;
+    renderApp();
+  };
+
+  recognition.onerror = (event) => {
+    console.error('Speech recognition error:', event.error);
+    STATE.isListening = false;
+    notify(`Error de micrófono: ${event.error}`, 'error');
+    renderApp();
+  };
+
+  recognition.onend = () => {
+    STATE.isListening = false;
+    renderApp();
+  };
+
+  recognition.start();
+}
 
 // Notification toast helper
 function notify(msg, type = 'info') {
@@ -131,7 +213,11 @@ function switchTab(tab) {
   renderApp();
 
   if (tab === 'study') {
-    startStudySession(STATE.studyLang);
+    if (STATE.studyLang) {
+      startStudySession(STATE.studyLang);
+    } else {
+      renderApp();
+    }
   } else if (tab === 'words') {
     loadWords();
   } else if (tab === 'dashboard') {
@@ -284,14 +370,19 @@ function renderDashboard() {
 }
 
 // ================= STUDY MODE =================
-async function startStudySession(lang = 'all') {
+async function startStudySession(lang = 'all', tag = '') {
   STATE.studyLang = lang;
+  STATE.studyTag = tag;
   STATE.currentCardIndex = 0;
   STATE.cardRevealed = false;
   STATE.wikiData = null;
+  STATE.pronunciationResult = null;
+  STATE.isListening = false;
 
   try {
-    const res = await apiGet(`/api/study/due?lang=${lang}&limit=50`);
+    const params = new URLSearchParams({ lang, limit: 50 });
+    if (tag) params.append('tag', tag);
+    const res = await apiGet(`/api/study/due?${params.toString()}`);
     if (res.success) {
       STATE.studyCards = res.cards;
     }
@@ -301,21 +392,124 @@ async function startStudySession(lang = 'all') {
   renderApp();
 }
 
-function startStudyLanguage(lang) {
+function startStudyLanguage(lang, tag = '') {
   STATE.studyLang = lang;
+  STATE.studyTag = tag;
   window.location.hash = 'study';
 }
 
+function chooseDifferentLanguage() {
+  STATE.studyLang = null;
+  STATE.studyTag = '';
+  STATE.pronunciationResult = null;
+  STATE.isListening = false;
+  renderApp();
+}
+
 function renderStudy() {
+  // If no language has been selected yet, show the Language & Tag Selection Screen
+  if (!STATE.studyLang) {
+    const stats = STATE.stats || { totals: [], due: [], tags: [] };
+    const langOrder = ['en', 'fr', 'de', 'it', 'pt'];
+    const totalDueAll = stats.due.reduce((acc, r) => acc + Number(r.count), 0);
+    const totalWordsAll = stats.totals.reduce((acc, r) => acc + Number(r.count), 0);
+    const tags = stats.tags || [];
+
+    return `
+      <div class="animate-fade-in" style="max-width:850px;margin:0 auto;display:flex;flex-direction:column;gap:28px;">
+        <div style="text-align:center;padding:10px 0 6px 0;">
+          <h1 style="font-size:2.2rem;font-weight:800;letter-spacing:-0.03em;margin-bottom:8px;">
+            ¿Qué deseas repasar hoy? 🌍
+          </h1>
+          <p style="color:var(--text-muted);font-size:1.05rem;">
+            Elige un idioma o filtra por tus etiquetas y listas favoritas.
+          </p>
+        </div>
+
+        <!-- Languages Selection Grid -->
+        <div>
+          <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:14px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;">
+            Por Idioma
+          </h3>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">
+            <!-- All Languages Card -->
+            <div class="glass" style="padding:22px;border-radius:20px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;justify-content:space-between;border:1px solid rgba(99,102,241,0.35);background:linear-gradient(135deg,rgba(99,102,241,0.18),rgba(6,182,212,0.12));" onclick="startStudySession('all')" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
+              <div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                  <span class="glass-pill" style="font-size:0.75rem;font-weight:700;color:#818cf8;background:rgba(99,102,241,0.25);">TODOS</span>
+                  <span style="font-size:0.85rem;font-weight:700;color:${totalDueAll > 0 ? '#f87171' : '#34d399'};">
+                    ${totalDueAll > 0 ? `⏰ ${totalDueAll} pendientes` : '✅ Al día'}
+                  </span>
+                </div>
+                <div style="font-size:1.4rem;font-weight:800;margin-bottom:4px;">Todos los idiomas</div>
+                <div style="color:var(--text-muted);font-size:0.9rem;">${totalWordsAll.toLocaleString()} palabras en total</div>
+              </div>
+              <button class="btn btn-primary" style="margin-top:16px;width:100%;font-size:0.9rem;">
+                Repasar Todo →
+              </button>
+            </div>
+
+            <!-- Individual Language Cards -->
+            ${langOrder.map(lang => {
+              const total = stats.totals.find(t => t.lang === lang)?.count || 0;
+              const due = stats.due.find(d => d.lang === lang)?.count || 0;
+              const info = LANGS[lang] || { name: lang.toUpperCase() };
+
+              return `
+                <div class="glass" style="padding:22px;border-radius:20px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;justify-content:space-between;" onclick="startStudySession('${lang}')" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
+                  <div>
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                      <span class="lang-badge ${lang}">${lang}</span>
+                      <span style="font-size:0.85rem;font-weight:700;color:${due > 0 ? '#f87171' : '#34d399'};">
+                        ${due > 0 ? `⏰ ${due} pendientes` : '✅ Al día'}
+                      </span>
+                    </div>
+                    <div style="font-size:1.4rem;font-weight:800;margin-bottom:4px;">${info.name}</div>
+                    <div style="color:var(--text-muted);font-size:0.9rem;">${total} palabras</div>
+                  </div>
+                  <button class="btn btn-secondary" style="margin-top:16px;width:100%;font-size:0.9rem;">
+                    Repasar ${info.name} →
+                  </button>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+
+        <!-- Tags / Categories Selection Section -->
+        ${tags.length > 0 ? `
+          <div class="glass" style="padding:24px;border-radius:20px;">
+            <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:8px;">
+              🏷️ Repasar por Etiquetas / Temas
+            </h3>
+            <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:16px;">
+              Haz clic en cualquiera de tus listas temáticas para repasar exclusivamente ese tema:
+            </p>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;">
+              ${tags.map(t => `
+                <button class="btn btn-outline" style="padding:6px 14px;font-size:0.85rem;border-radius:9999px;background:rgba(255,255,255,0.03);" onclick="startStudySession('all', '${t.replace(/'/g, "\\'")}')">
+                  🏷️ ${t}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
   const cards = STATE.studyCards || [];
   const card = cards[STATE.currentCardIndex];
 
   return `
     <div class="animate-fade-in" style="max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:20px;">
-      <!-- Language Selector Header -->
+      <!-- Language & Tag Header -->
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-        <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;">
-          <button class="btn ${STATE.studyLang === 'all' ? 'btn-primary' : 'btn-outline'}" style="padding:6px 14px;font-size:0.85rem;" onclick="startStudySession('all')">
+        <div style="display:flex;gap:6px;align-items:center;overflow-x:auto;padding-bottom:4px;">
+          <button class="btn btn-outline" style="padding:6px 12px;font-size:0.85rem;" onclick="chooseDifferentLanguage()" title="Volver a elegir idioma o tag">
+            ← Cambiar idioma/tag
+          </button>
+          <button class="btn ${STATE.studyLang === 'all' && !STATE.studyTag ? 'btn-primary' : 'btn-outline'}" style="padding:6px 14px;font-size:0.85rem;" onclick="startStudySession('all')">
             Todos
           </button>
           ${Object.keys(LANGS).map(l => `
@@ -325,6 +519,7 @@ function renderStudy() {
           `).join('')}
         </div>
         <div style="font-size:0.9rem;color:var(--text-muted);font-weight:600;">
+          ${STATE.studyTag ? `<span class="glass-pill" style="margin-right:8px;color:#818cf8;">🏷️ ${STATE.studyTag}</span>` : ''}
           ${cards.length > 0 ? `Tarjeta ${STATE.currentCardIndex + 1} de ${cards.length}` : '0 tarjetas'}
         </div>
       </div>
@@ -371,6 +566,9 @@ function renderStudy() {
               <button class="btn btn-secondary" onclick="speak('${card.word.replace(/'/g, "\\'")}', '${card.lang}')" title="Escuchar pronunciación nativa por voz (R)" style="padding:8px 16px;">
                 🔊 Escuchar
               </button>
+              <button class="btn ${STATE.isListening ? 'btn-primary' : 'btn-secondary'}" onclick="startSpeechRecognition('${card.word.replace(/'/g, "\\'")}', '${card.lang}')" style="padding:8px 16px;background:${STATE.isListening ? '#ef4444' : ''};" title="Habla por el micrófono y el sistema evaluará tu pronunciación">
+                ${STATE.isListening ? '🎙️ Escuchándote...' : '🎤 Calificar mi pronunciación'}
+              </button>
               <a href="https://youglish.com/pronounce/${encodeURIComponent(card.word)}/${LANGS[card.lang]?.youglish || 'english'}" target="_blank" class="btn btn-outline" style="padding:8px 16px;text-decoration:none;" title="Ver personas pronunciando esta palabra en videos de YouTube">
                 🎬 YouGlish
               </a>
@@ -381,6 +579,18 @@ function renderStudy() {
                 ▶️ YouTube
               </a>
             </div>
+
+            <!-- Pronunciation Feedback Result -->
+            ${STATE.pronunciationResult ? `
+              <div class="animate-fade-in" style="margin-top:18px;padding:14px 20px;border-radius:14px;background:rgba(255,255,255,0.04);border:1px solid ${STATE.pronunciationResult.color};display:inline-flex;flex-direction:column;align-items:center;gap:6px;">
+                <div style="font-size:1.15rem;font-weight:800;color:${STATE.pronunciationResult.color};">
+                  ${STATE.pronunciationResult.label} (${STATE.pronunciationResult.score}%)
+                </div>
+                <div style="font-size:0.85rem;color:var(--text-muted);">
+                  Detectado: <b style="color:white;">"${STATE.pronunciationResult.spoken}"</b> · Objetivo: <b style="color:white;">"${card.word}"</b>
+                </div>
+              </div>
+            ` : ''}
           </div>
 
           <!-- Divider / Flip Action -->
@@ -982,6 +1192,8 @@ async function testRemindersNow() {
 // Global exposure for inline HTML event handlers
 window.startStudySession = startStudySession;
 window.startStudyLanguage = startStudyLanguage;
+window.chooseDifferentLanguage = chooseDifferentLanguage;
+window.startSpeechRecognition = startSpeechRecognition;
 window.revealCard = revealCard;
 window.submitRating = submitRating;
 window.speak = speak;

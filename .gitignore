@@ -8,3 +8,5 @@ service-account*.json
 credentials.json
 .DS_Store
 Thumbs.db
+
+vocab-master-*.json
