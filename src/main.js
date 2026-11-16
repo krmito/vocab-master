@@ -1865,7 +1865,10 @@ function renderSettings() {
           ` : ''}
 
           <div>
-            <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px;">ID del Calendario (Tu correo Gmail):</label>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <label style="font-size:0.8rem;color:var(--text-muted);">ID del Calendario (Tu correo Gmail):</label>
+              <a href="https://calendar.google.com/calendar/u/0/r" target="_blank" style="font-size:0.75rem;color:#38bdf8;text-decoration:none;">↗️ Abrir Google Calendar</a>
+            </div>
             <input 
               type="text" 
               id="cfgCalendarId" 
@@ -2163,7 +2166,13 @@ async function saveReminderSettings() {
 
   const res = await apiPost('/api/settings', payload);
   if (res && res.success) {
-    notify('Programación y recordatorios guardados correctamente', 'success');
+    if (res.calendar && res.calendar.success) {
+      notify(`✅ Ajustes guardados y evento agendado para ${res.calendar.isTomorrow ? 'mañana' : 'hoy'} (${res.calendar.targetDate}) a las ${res.calendar.targetTime}`, 'success');
+    } else if (res.calendar && (res.calendar.error || res.calendar.reason)) {
+      notify(`⚠️ Ajustes guardados, pero Calendar indicó: ${res.calendar.error || res.calendar.reason}`, 'error');
+    } else {
+      notify('Programación y recordatorios guardados correctamente', 'success');
+    }
   } else {
     notify(`Error al guardar: ${res?.error || 'Desconocido'}`, 'error');
   }
@@ -2199,9 +2208,10 @@ async function testRemindersNow() {
     
     // Calendar check
     if (res.calendar?.success) {
-      notify('✅ Google Calendar: ¡Evento creado o actualizado!', 'success');
+      const cal = res.calendar;
+      notify(`✅ Google Calendar: ¡Evento agendado para ${cal.isTomorrow ? 'mañana' : 'hoy'} (${cal.targetDate}) a las ${cal.targetTime}!`, 'success');
     } else {
-      notify(`⚠️ Calendar: ${res.calendar?.error || res.calendar?.reason || 'Error'}`, 'error');
+      notify(`⚠️ Calendar: ${res.calendar?.error || res.calendar?.reason || 'Error al conectar con Calendar'}`, 'error');
     }
 
     // Telegram check

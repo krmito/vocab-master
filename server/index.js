@@ -15,7 +15,7 @@ import { calculateNextReview } from './srs.js';
 import { lookupWord } from './wiktionary.js';
 import { getWordImage, searchImageCandidates, setWordImage, clearImageCache } from './images.js';
 import { checkAndSyncDrive, setupDriveWatch, getServiceAccountEmail, sanitizeDriveFolderId } from './drive.js';
-import { syncDailyCalendarEvent } from './calendar.js';
+import { syncDailyCalendarEvent, getCalendarId } from './calendar.js';
 import { sendDailyTelegramReminder, handleTelegramUpdate, startTelegramPolling, getBotToken, getChatId, detectChatIdFromBot } from './telegram.js';
 import { startScheduler } from './scheduler.js';
 import { enrichWordInDb, enrichAllMissingExamples } from './examples.js';
@@ -682,7 +682,22 @@ app.post('/api/settings', async (req, res) => {
       await setSetting('telegram_chat_id', cleanChatId);
     }
 
-    res.json({ success: true, message: 'Configuraciones guardadas' });
+    // Auto-sync calendar event immediately upon saving if a calendar is configured
+    let calResult = null;
+    try {
+      const effectiveCalId = await getCalendarId();
+      if (effectiveCalId && effectiveCalId !== 'primary') {
+        calResult = await syncDailyCalendarEvent(getAppPublicUrl(), true);
+      }
+    } catch (calErr) {
+      console.warn('[Settings] Error auto-syncing calendar after save:', calErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'Configuraciones guardadas',
+      calendar: calResult
+    });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
