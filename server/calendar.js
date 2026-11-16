@@ -106,9 +106,6 @@ export async function syncDailyCalendarEvent(appUrl = '') {
           description,
           start: { dateTime: startIso, timeZone },
           end: { dateTime: endIso, timeZone },
-          attendees: [
-            { email: calendarId, responseStatus: 'accepted' }
-          ],
           reminders: {
             useDefault: false,
             overrides: [

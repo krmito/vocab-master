@@ -334,3 +334,54 @@ export async function startTelegramPolling() {
 
   poll();
 }
+
+export async function detectChatIdFromBot() {
+  const token = await getBotToken();
+  if (!token) {
+    return { success: false, error: 'Falta configurar TELEGRAM_BOT_TOKEN primero en Ajustes.' };
+  }
+
+  // Call getUpdates to see recent incoming messages to this bot
+  const res = await callTelegram('getUpdates', { limit: 15 });
+  if (!res || !res.ok) {
+    return { success: false, error: res?.description || 'Error al comunicarse con Telegram' };
+  }
+
+  const updates = res.result || [];
+  if (updates.length === 0) {
+    return {
+      success: false,
+      error: 'No hay mensajes recientes en tu bot. Entra a tu bot en Telegram, envíale cualquier mensaje (ej: /start o hola) y vuelve a presionar este botón.'
+    };
+  }
+
+  // Look from newest to oldest for a message
+  let found = null;
+  for (let i = updates.length - 1; i >= 0; i--) {
+    const msg = updates[i].message || updates[i].channel_post;
+    if (msg && msg.chat && msg.chat.id) {
+      found = msg.chat;
+      break;
+    }
+  }
+
+  if (!found) {
+    return { success: false, error: 'No se pudo encontrar el Chat ID en los mensajes recibidos.' };
+  }
+
+  await setSetting('telegram_chat_id', String(found.id));
+
+  // Send a greeting to confirm
+  await callTelegram('sendMessage', {
+    chat_id: found.id,
+    text: `🎉 <b>¡Conexión exitosa!</b> Hola ${found.first_name || ''}, tu bot de vocabulario ha sido vinculado correctamente.`,
+    parse_mode: 'HTML'
+  });
+
+  return {
+    success: true,
+    chatId: found.id,
+    name: found.first_name || found.username || 'Usuario',
+    message: `¡Chat ID detectado y guardado (${found.id})! Te enviamos un saludo a Telegram para confirmar.`
+  };
+}

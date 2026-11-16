@@ -11,7 +11,7 @@ import { lookupWord } from './wiktionary.js';
 import { getWordImage, searchImageCandidates, setWordImage, clearImageCache } from './images.js';
 import { checkAndSyncDrive, setupDriveWatch, getServiceAccountEmail } from './drive.js';
 import { syncDailyCalendarEvent } from './calendar.js';
-import { sendDailyTelegramReminder, handleTelegramUpdate, startTelegramPolling, getBotToken } from './telegram.js';
+import { sendDailyTelegramReminder, handleTelegramUpdate, startTelegramPolling, getBotToken, detectChatIdFromBot } from './telegram.js';
 import { startScheduler } from './scheduler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -431,6 +431,16 @@ app.post('/api/remind/now', async (req, res) => {
       calendar: calRes,
       telegram: tgRes
     });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 9b. Auto-detect Telegram Chat ID from incoming message
+app.post('/api/telegram/detect', async (req, res) => {
+  try {
+    const result = await detectChatIdFromBot();
+    res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

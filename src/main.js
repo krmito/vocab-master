@@ -1603,14 +1603,19 @@ function renderSettings() {
             </div>
             <div>
               <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px;">Tu Chat ID (número):</label>
-              <input 
-                type="text" 
-                id="cfgTgChatId" 
-                placeholder="Ej. 123456789" 
-                value="${s.tgChatId || ''}"
-                class="input"
-                style="width:100%;font-size:0.9rem;"
-              >
+              <div style="display:flex;gap:6px;">
+                <input 
+                  type="text" 
+                  id="cfgTgChatId" 
+                  placeholder="Ej. 123456789" 
+                  value="${s.tgChatId || ''}"
+                  class="input"
+                  style="flex:1;font-size:0.9rem;"
+                >
+                <button type="button" class="btn btn-secondary" onclick="autoDetectTelegramChatId()" style="padding:6px 12px;font-size:0.8rem;white-space:nowrap;background:rgba(99,102,241,0.2);border-color:rgba(99,102,241,0.4);" title="Detecta tu Chat ID leyendo el último mensaje que le enviaste a tu bot">
+                  🔍 Auto-detectar
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1764,6 +1769,27 @@ async function saveReminderSettings() {
   renderApp();
 }
 
+async function autoDetectTelegramChatId() {
+  const tgToken = document.getElementById('cfgTgToken')?.value?.trim();
+  if (tgToken) {
+    await apiPost('/api/settings', { tgBotToken: tgToken });
+  }
+
+  notify('Buscando mensajes entrantes en tu bot...', 'info');
+  try {
+    const res = await apiPost('/api/telegram/detect');
+    if (res.success) {
+      notify(res.message, 'success');
+      await loadSettings();
+      renderApp();
+    } else {
+      notify(res.error || 'No se pudo detectar el Chat ID', 'error');
+    }
+  } catch (err) {
+    notify('Error al detectar Chat ID', 'error');
+  }
+}
+
 async function testRemindersNow() {
   notify('Ejecutando prueba de recordatorios...', 'info');
   try {
@@ -1819,6 +1845,7 @@ window.uploadExcelFile = uploadExcelFile;
 window.saveDriveFolder = saveDriveFolder;
 window.saveReminderHour = saveReminderHour;
 window.saveReminderSettings = saveReminderSettings;
+window.autoDetectTelegramChatId = autoDetectTelegramChatId;
 window.testRemindersNow = testRemindersNow;
 
 // Boot
