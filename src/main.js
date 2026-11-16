@@ -1912,7 +1912,7 @@ function renderSettings() {
                 <input 
                   type="text" 
                   id="cfgTgChatId" 
-                  placeholder="Ej. 9028328272" 
+                  placeholder="Ej. 123456789" 
                   value="${s.tgChatId || ''}"
                   class="input"
                   style="flex:1;font-size:0.9rem;"
