@@ -7,9 +7,22 @@ const __dirname = path.dirname(__filename);
 
 let dbClient = null;
 let isPostgres = false;
+let activeDbPath = '';
+
+export function getDbInfo() {
+  return {
+    isPostgres,
+    type: isPostgres ? 'PostgreSQL' : 'SQLite',
+    path: isPostgres ? 'PostgreSQL (Railway Database)' : activeDbPath,
+    isPersistent: isPostgres || activeDbPath.startsWith('/data') || activeDbPath.includes('/app/data')
+  };
+}
 
 export async function initDb() {
-  const databaseUrl = process.env.DATABASE_URL;
+  const databaseUrl = process.env.DATABASE_URL ||
+                      process.env.DATABASE_PRIVATE_URL ||
+                      process.env.POSTGRES_URL ||
+                      process.env.POSTGRESQL_URL;
 
   if (databaseUrl && (databaseUrl.startsWith('postgres://') || databaseUrl.startsWith('postgresql://'))) {
     console.log('[DB] Conectando a PostgreSQL en Railway...');
@@ -20,15 +33,29 @@ export async function initDb() {
     });
     dbClient = pool;
     isPostgres = true;
+    activeDbPath = 'PostgreSQL';
     await setupPostgresTables(pool);
   } else {
     console.log('[DB] Usando SQLite local (node:sqlite)...');
     const { DatabaseSync } = await import('node:sqlite');
-    const dbDir = path.join(__dirname, '..', 'data');
+
+    let dbDir = path.join(__dirname, '..', 'data');
+    // Check if Railway mounted volume at /data (root) instead of /app/data
+    if (process.platform === 'linux' && fs.existsSync('/data')) {
+      try {
+        fs.accessSync('/data', fs.constants.W_OK);
+        dbDir = '/data';
+        console.log('[DB] Detectado volumen permanente de Railway en /data');
+      } catch (e) {}
+    }
+
     if (!fs.existsSync(dbDir)) {
       fs.mkdirSync(dbDir, { recursive: true });
     }
     const dbPath = path.join(dbDir, 'vocab.sqlite');
+    activeDbPath = dbPath;
+    console.log(`[DB] Archivo SQLite en: ${dbPath}`);
+
     const sqlite = new DatabaseSync(dbPath);
     sqlite.exec('PRAGMA journal_mode = WAL;');
     dbClient = sqlite;
@@ -86,6 +113,12 @@ function setupSqliteTables(sqlite) {
       data_json TEXT NOT NULL,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(lang, word)
+    );
+
+    CREATE TABLE IF NOT EXISTS image_cache (
+      word TEXT PRIMARY KEY,
+      image_url TEXT NOT NULL,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS settings (
@@ -147,6 +180,12 @@ async function setupPostgresTables(pool) {
       CONSTRAINT uq_wiki_lang_word UNIQUE(lang, word)
     );
 
+    CREATE TABLE IF NOT EXISTS image_cache (
+      word VARCHAR(255) PRIMARY KEY,
+      image_url TEXT NOT NULL,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key VARCHAR(100) PRIMARY KEY,
       value TEXT
@@ -182,7 +221,10 @@ export async function query(sql, params = []) {
 export async function execute(sql, params = []) {
   if (isPostgres) {
     let pIdx = 1;
-    const pgSql = sql.replace(/\?/g, () => `$${pIdx++}`);
+    let pgSql = sql.replace(/\?/g, () => `$${pIdx++}`);
+    if (/^\s*INSERT\s+INTO/i.test(pgSql) && !/RETURNING/i.test(pgSql)) {
+      pgSql += ' RETURNING id';
+    }
     const res = await dbClient.query(pgSql, params);
     return {
       changes: res.rowCount,

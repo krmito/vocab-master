@@ -21,6 +21,10 @@ const STATE = {
   wikiLoading: false,
   wikiData: null,
   showConjugations: false,
+  cardImage: null,
+  loadingImage: false,
+  showImage: true,
+  modalImage: null,
   settings: null,
   notification: null
 };
@@ -439,6 +443,31 @@ function renderDashboard() {
         </div>
       </div>
 
+      <!-- Database & Persistence Diagnostics Card -->
+      ${stats.dbInfo ? `
+        <div class="glass" style="padding:18px 24px;border-radius:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;border-color:${stats.dbInfo.isPersistent ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.4)'};background:${stats.dbInfo.isPersistent ? 'rgba(16,185,129,0.06)' : 'rgba(245,158,11,0.07)'};">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div style="font-size:1.8rem;">${stats.dbInfo.isPostgres ? '🐘' : (stats.dbInfo.isPersistent ? '💾' : '⚠️')}</div>
+            <div>
+              <div style="font-weight:700;font-size:1rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span>Base de Datos: <b style="color:${stats.dbInfo.isPersistent ? '#34d399' : '#fbbf24'};">${stats.dbInfo.type}</b></span>
+                <span class="glass-pill" style="font-size:0.75rem;font-weight:700;background:${stats.dbInfo.isPersistent ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)'};color:${stats.dbInfo.isPersistent ? '#34d399' : '#fbbf24'};">
+                  ${stats.dbInfo.isPersistent ? '✅ Almacenamiento Permanente Activo' : '⚠️ Almacenamiento Temporal (Falta vincular DATABASE_URL o Volumen)'}
+                </span>
+              </div>
+              <div style="font-size:0.85rem;color:var(--text-muted);margin-top:3px;">
+                ${stats.dbInfo.isPersistent 
+                  ? `Tus calificaciones y progreso (${stats.totalReviews} repasos guardados) persistirán de forma permanente.` 
+                  : 'Para que no se borre tu progreso al desplegar, añade la variable DATABASE_URL en Railway o un volumen en /app/data.'}
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-outline" onclick="window.location.hash='settings'" style="padding:6px 14px;font-size:0.85rem;">
+            Ver ajustes ⚙️
+          </button>
+        </div>
+      ` : ''}
+
       <!-- Quick Stats Grid -->
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;">
         <div class="glass" style="padding:22px;">
@@ -503,6 +532,8 @@ async function startStudySession(lang = 'all', tag = '') {
   STATE.wikiData = null;
   STATE.pronunciationResult = null;
   STATE.isListening = false;
+  STATE.showConjugations = false;
+  STATE.cardImage = null;
 
   try {
     const params = new URLSearchParams({ lang, limit: 50 });
@@ -510,6 +541,9 @@ async function startStudySession(lang = 'all', tag = '') {
     const res = await apiGet(`/api/study/due?${params.toString()}`);
     if (res.success) {
       STATE.studyCards = res.cards;
+      if (res.cards.length > 0 && STATE.showImage) {
+        loadCardImage(res.cards[0].id);
+      }
     }
   } catch (err) {
     notify('Error cargando tarjetas para repasar', 'error');
@@ -665,10 +699,13 @@ function renderStudy() {
       ` : `
         <div class="glass" style="padding:36px;border-radius:24px;box-shadow:0 20px 40px -10px rgba(0,0,0,0.5);display:flex;flex-direction:column;gap:24px;">
           <!-- Card Top Bar -->
-          <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <div style="display:flex;align-items:center;gap:8px;">
               <span class="lang-badge ${card.lang}">${card.lang}</span>
               ${card.tags ? `<span class="glass-pill" style="font-size:0.75rem;color:var(--text-muted);">${card.tags}</span>` : ''}
+              <button onclick="toggleShowImage()" style="background:none;border:none;cursor:pointer;font-size:0.8rem;color:var(--text-muted);margin-left:4px;" title="Mostrar u ocultar imagen">
+                ${STATE.showImage ? '🖼️ Ocultar foto' : '🖼️ Ver foto'}
+              </button>
             </div>
             <div style="font-size:0.8rem;color:var(--text-dim);font-weight:600;">
               Repasos: ${card.reps || 0} ${card.scheduled_days ? `· Intervalo: ${card.scheduled_days}d` : ''}
@@ -676,7 +713,29 @@ function renderStudy() {
           </div>
 
           <!-- Target Word Front -->
-          <div style="text-align:center;padding:20px 0;">
+          <div style="text-align:center;padding:12px 0;">
+            <!-- Illustrative Image -->
+            ${STATE.showImage ? `
+              <div style="margin:0 auto 16px auto;max-width:380px;">
+                ${STATE.loadingImage ? `
+                  <div style="height:160px;width:100%;background:rgba(255,255,255,0.02);border:1px dashed var(--border-subtle);border-radius:16px;display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:0.85rem;">
+                    Buscando imagen descriptiva...
+                  </div>
+                ` : STATE.cardImage ? `
+                  <div style="overflow:hidden;border-radius:16px;border:1px solid var(--border-subtle);box-shadow:0 12px 30px rgba(0,0,0,0.5);max-height:200px;">
+                    <img 
+                      src="${STATE.cardImage}" 
+                      alt="${card.word}" 
+                      style="width:100%;height:180px;object-fit:cover;display:block;transition:transform 0.3s;"
+                      onmouseover="this.style.transform='scale(1.03)'"
+                      onmouseout="this.style.transform='scale(1)'"
+                      onerror="this.parentElement.style.display='none'"
+                    >
+                  </div>
+                ` : ''}
+              </div>
+            ` : ''}
+
             <h1 style="font-size:2.8rem;font-weight:800;letter-spacing:-0.03em;margin-bottom:8px;">
               ${card.word}
             </h1>
@@ -861,6 +920,34 @@ async function loadWiktionary(wordId) {
   }
 }
 
+async function loadCardImage(wordId) {
+  if (!wordId || !STATE.showImage) return;
+  STATE.loadingImage = true;
+  STATE.cardImage = null;
+  renderApp();
+  try {
+    const res = await apiGet(`/api/words/${wordId}/image`);
+    if (res && res.imageUrl) {
+      STATE.cardImage = res.imageUrl;
+    }
+  } catch (err) {
+    console.warn('Error loading card image:', err);
+  } finally {
+    STATE.loadingImage = false;
+    renderApp();
+  }
+}
+
+function toggleShowImage() {
+  STATE.showImage = !STATE.showImage;
+  if (STATE.showImage && !STATE.cardImage) {
+    const card = STATE.studyCards[STATE.currentCardIndex];
+    if (card) loadCardImage(card.id);
+  } else {
+    renderApp();
+  }
+}
+
 async function submitRating(wordId, rating) {
   try {
     await apiPost('/api/study/review', { wordId, rating });
@@ -870,7 +957,13 @@ async function submitRating(wordId, rating) {
     STATE.pronunciationResult = null;
     STATE.isListening = false;
     STATE.showConjugations = false;
+    STATE.cardImage = null;
     renderApp();
+
+    const nextCard = STATE.studyCards[STATE.currentCardIndex];
+    if (nextCard && STATE.showImage) {
+      loadCardImage(nextCard.id);
+    }
   } catch (err) {
     notify('Error guardando calificación', 'error');
   }
@@ -1018,7 +1111,16 @@ async function openWordModal(wordId) {
 
   STATE.selectedWord = found;
   STATE.wikiData = null;
+  STATE.modalImage = null;
   renderApp();
+
+  // Load image for modal
+  apiGet(`/api/words/${wordId}/image`).then(r => {
+    if (r && r.imageUrl) {
+      STATE.modalImage = r.imageUrl;
+      renderApp();
+    }
+  });
 
   // Load wiktionary
   STATE.wikiLoading = true;
@@ -1038,6 +1140,7 @@ async function openWordModal(wordId) {
 function closeWordModal() {
   STATE.selectedWord = null;
   STATE.wikiData = null;
+  STATE.modalImage = null;
   renderApp();
 }
 
@@ -1056,6 +1159,12 @@ function renderWordModal() {
           </div>
           <button onclick="closeWordModal()" class="btn btn-outline" style="padding:4px 10px;font-size:1.1rem;">✕</button>
         </div>
+
+        ${STATE.modalImage ? `
+          <div style="margin-bottom:16px;max-height:220px;overflow:hidden;border-radius:14px;border:1px solid var(--border-subtle);box-shadow:0 10px 25px rgba(0,0,0,0.4);">
+            <img src="${STATE.modalImage}" alt="${w.word}" style="width:100%;height:200px;object-fit:cover;display:block;" onerror="this.parentElement.style.display='none'">
+          </div>
+        ` : ''}
 
         <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
           <button class="btn btn-secondary" onclick="speak('${w.word.replace(/'/g, "\\'")}', '${w.lang}')" style="padding:6px 14px;font-size:0.85rem;">
@@ -1325,6 +1434,8 @@ window.startStudyLanguage = startStudyLanguage;
 window.chooseDifferentLanguage = chooseDifferentLanguage;
 window.startSpeechRecognition = startSpeechRecognition;
 window.toggleConjugations = toggleConjugations;
+window.toggleShowImage = toggleShowImage;
+window.loadCardImage = loadCardImage;
 window.revealCard = revealCard;
 window.submitRating = submitRating;
 window.speak = speak;

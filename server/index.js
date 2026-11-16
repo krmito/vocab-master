@@ -4,10 +4,11 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { initDb, query, execute, getSetting, setSetting } from './db.js';
+import { initDb, query, execute, getSetting, setSetting, getDbInfo } from './db.js';
 import { importExcelFromFile, importExcelFromBuffer } from './excel.js';
 import { calculateNextReview } from './srs.js';
 import { lookupWord } from './wiktionary.js';
+import { getWordImage } from './images.js';
 import { checkAndSyncDrive, setupDriveWatch } from './drive.js';
 import { syncDailyCalendarEvent } from './calendar.js';
 import { sendDailyTelegramReminder, handleTelegramUpdate, startTelegramPolling } from './telegram.js';
@@ -70,13 +71,17 @@ app.get('/api/stats', async (req, res) => {
       }
     }
 
+    const totalReviews = parseInt(reviewsCount[0]?.total || 0, 10);
+    const dbInfo = getDbInfo();
+
     res.json({
       success: true,
       totals: totalWords,
       due: dueWords,
       states: stateStats,
-      totalReviews: reviewsCount[0]?.total || 0,
+      totalReviews,
       tags: Array.from(allTags).sort(),
+      dbInfo,
       lastSync,
       lastFileName
     });
@@ -272,6 +277,24 @@ app.get('/api/words/:id/wiktionary', async (req, res) => {
       success: true,
       data: wikiData
     });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5b. Word Illustrative Image
+app.get('/api/words/:id/image', async (req, res) => {
+  try {
+    const wordId = req.params.id;
+    const words = await query('SELECT lang, word FROM words WHERE id = ?', [wordId]);
+    if (!words || words.length === 0) {
+      return res.status(404).json({ success: false, error: 'Palabra no encontrada' });
+    }
+
+    const { lang, word } = words[0];
+    const imgResult = await getWordImage(word, lang);
+
+    res.json(imgResult);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
