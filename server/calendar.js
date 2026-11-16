@@ -18,9 +18,17 @@ export async function syncDailyCalendarEvent(appUrl = '') {
     return { success: false, reason: 'Google Calendar no configurado (falta cuenta de servicio).' };
   }
 
-  const calendarId = process.env.GOOGLE_CALENDAR_ID || (await getSetting('calendar_id')) || 'primary';
+  const calendarId = process.env.GOOGLE_CALENDAR_ID || (await getSetting('calendar_id'));
   const reminderHour = parseInt(process.env.REMINDER_HOUR || (await getSetting('reminder_hour')) || '9', 10);
   const timeZone = process.env.TIMEZONE || 'America/Bogota';
+  const saEmail = getServiceAccountEmail();
+
+  if (!calendarId || calendarId === 'primary') {
+    return {
+      success: false,
+      reason: `Falta configurar tu correo de Gmail en "ID del Calendario" en la pestaña Ajustes (actualmente está vacío o en 'primary', por lo que el evento se creó en el calendario privado de ${saEmail || 'la cuenta de servicio'} en vez de tu Google Calendar personal).`
+    };
+  }
 
   try {
     // 1. Get due cards count by language
@@ -42,10 +50,16 @@ export async function syncDailyCalendarEvent(appUrl = '') {
     const breakdown = rows.map(r => `${r.lang.toUpperCase()}: ${r.count}`).join(' · ');
     const eventTitle = `📚 Repaso Vocabulario: ${totalDue} palabras (${breakdown})`;
 
-    // Today's date in local target
-    const today = new Date();
-    const startTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), reminderHour, 0, 0);
-    const endTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), reminderHour, 30, 0);
+    // Today's date in target time zone: YYYY-MM-DD
+    const nowTarget = new Date();
+    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });
+    const localDateStr = formatter.format(nowTarget); // YYYY-MM-DD
+
+    const hStr = String(reminderHour).padStart(2, '0');
+    const startIso = `${localDateStr}T${hStr}:00:00`;
+    const endH = reminderHour + 1 > 23 ? 23 : reminderHour;
+    const endM = reminderHour + 1 > 23 ? '59' : '30';
+    const endIso = `${localDateStr}T${String(endH).padStart(2, '0')}:${endM}:00`;
 
     const description = [
       `Tienes ${totalDue} palabras listas para repasar hoy:`,
@@ -55,8 +69,8 @@ export async function syncDailyCalendarEvent(appUrl = '') {
     ].join('\n');
 
     // Search if an event already exists for today
-    const dayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0).toISOString();
-    const dayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59).toISOString();
+    const dayStart = `${localDateStr}T00:00:00Z`;
+    const dayEnd = `${localDateStr}T23:59:59Z`;
 
     const searchRes = await calendar.events.list({
       calendarId,
@@ -77,12 +91,12 @@ export async function syncDailyCalendarEvent(appUrl = '') {
         requestBody: {
           summary: eventTitle,
           description,
-          start: { dateTime: startTime.toISOString(), timeZone },
-          end: { dateTime: endTime.toISOString(), timeZone }
+          start: { dateTime: startIso, timeZone },
+          end: { dateTime: endIso, timeZone }
         }
       });
       resultEvent = updateRes.data;
-      console.log('[Calendar] Evento actualizado:', eventTitle);
+      console.log('[Calendar] Evento actualizado en Google Calendar:', eventTitle);
     } else {
       // Insert new event
       const insertRes = await calendar.events.insert({
@@ -90,8 +104,11 @@ export async function syncDailyCalendarEvent(appUrl = '') {
         requestBody: {
           summary: eventTitle,
           description,
-          start: { dateTime: startTime.toISOString(), timeZone },
-          end: { dateTime: endTime.toISOString(), timeZone },
+          start: { dateTime: startIso, timeZone },
+          end: { dateTime: endIso, timeZone },
+          attendees: [
+            { email: calendarId, responseStatus: 'accepted' }
+          ],
           reminders: {
             useDefault: false,
             overrides: [
@@ -102,7 +119,7 @@ export async function syncDailyCalendarEvent(appUrl = '') {
         }
       });
       resultEvent = insertRes.data;
-      console.log('[Calendar] Evento creado:', eventTitle);
+      console.log('[Calendar] Evento creado en Google Calendar:', eventTitle);
     }
 
     return { success: true, event: resultEvent };
