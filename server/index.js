@@ -1,3 +1,8 @@
+import dns from 'node:dns';
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch (e) {}
+
 import express from 'express';
 import cors from 'cors';
 import path from 'node:path';
@@ -13,6 +18,7 @@ import { checkAndSyncDrive, setupDriveWatch, getServiceAccountEmail } from './dr
 import { syncDailyCalendarEvent } from './calendar.js';
 import { sendDailyTelegramReminder, handleTelegramUpdate, startTelegramPolling, getBotToken, detectChatIdFromBot } from './telegram.js';
 import { startScheduler } from './scheduler.js';
+import { enrichWordInDb, enrichAllMissingExamples } from './examples.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -445,6 +451,52 @@ app.delete('/api/words/:id/image', async (req, res) => {
 app.post('/api/images/clear-cache', async (req, res) => {
   try {
     const result = await clearImageCache();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5g. Enrich single word with bilingual examples
+app.post('/api/words/:id/enrich-examples', async (req, res) => {
+  try {
+    const wordId = req.params.id;
+    const result = await enrichWordInDb(wordId);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5h. Check status of words missing examples
+app.get('/api/words/enrich-examples/status', async (req, res) => {
+  try {
+    const countRes = await query(`
+      SELECT lang, COUNT(id) as count
+      FROM words
+      WHERE active = 1 AND (examples IS NULL OR examples = '' OR examples = '[]' OR examples = 'null')
+      GROUP BY lang
+    `);
+    const totalRes = await query(`
+      SELECT COUNT(id) as total
+      FROM words
+      WHERE active = 1 AND (examples IS NULL OR examples = '' OR examples = '[]' OR examples = 'null')
+    `);
+    res.json({
+      success: true,
+      totalMissing: parseInt(totalRes[0]?.total || 0, 10),
+      byLanguage: countRes
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5i. Trigger background enrichment for all missing examples
+app.post('/api/words/enrich-examples', async (req, res) => {
+  try {
+    const limit = parseInt(req.body?.limit || 200, 10);
+    const result = await enrichAllMissingExamples(limit);
     res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

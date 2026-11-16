@@ -1,6 +1,7 @@
 import xlsxModule from 'xlsx';
 const XLSX = xlsxModule.readFile ? xlsxModule : (xlsxModule.default || xlsxModule);
 import { query, execute, getDb } from './db.js';
+import { enrichAllMissingExamples } from './examples.js';
 
 export function parseExamples(raw) {
   if (!raw || typeof raw !== 'string') return [];
@@ -72,15 +73,25 @@ async function processWorkbook(workbook) {
         stats.totalWords++;
 
         // Check if word exists
-        const existing = await query('SELECT id FROM words WHERE lang = ? AND word = ?', [lang, word]);
+        const existing = await query('SELECT id, examples FROM words WHERE lang = ? AND word = ?', [lang, word]);
 
         if (existing && existing.length > 0) {
           const wordId = existing[0].id;
+          const currentExamples = existing[0].examples;
+
+          // If incoming excel has empty examples, but database already has examples, preserve the database examples!
+          let finalExamples = examplesJson;
+          if (finalExamples === '[]' || !finalExamples) {
+            if (currentExamples && currentExamples !== '[]' && currentExamples !== '""') {
+              finalExamples = currentExamples;
+            }
+          }
+
           await execute(`
             UPDATE words 
             SET transcription = ?, translation = ?, additional_translation = ?, tags = ?, examples = ?, active = 1, updated_at = ?
             WHERE id = ?
-          `, [transcription, translation, addTranslation, tags, examplesJson, nowIso, wordId]);
+          `, [transcription, translation, addTranslation, tags, finalExamples, nowIso, wordId]);
           stats.updated++;
         } else {
           // Insert new word
@@ -110,6 +121,11 @@ async function processWorkbook(workbook) {
     if (!isPostgres) {
       db.exec('COMMIT;');
     }
+
+    // Trigger automatic bilingual example enrichment in the background for any words lacking examples
+    setTimeout(() => {
+      enrichAllMissingExamples(150).catch(err => console.warn('[AutoExamples] Sync trigger error:', err.message));
+    }, 1000);
   } catch (err) {
     if (!isPostgres) {
       try { db.exec('ROLLBACK;'); } catch (e) {}

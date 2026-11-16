@@ -1749,7 +1749,10 @@ function renderWordModal() {
         <!-- Examples -->
         ${w.examples && w.examples.length > 0 ? `
           <div>
-            <div style="font-size:0.8rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;margin-bottom:8px;">Ejemplos</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+              <div style="font-size:0.8rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;">Ejemplos</div>
+              <button onclick="enrichModalWord(${w.id})" style="background:none;border:none;cursor:pointer;color:var(--primary);font-size:0.75rem;font-weight:600;padding:2px 6px;">✨ Buscar más ejemplos</button>
+            </div>
             <div style="display:flex;flex-direction:column;gap:10px;">
               ${w.examples.map(ex => `
                 <div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle);padding:12px;border-radius:10px;">
@@ -1759,7 +1762,14 @@ function renderWordModal() {
               `).join('')}
             </div>
           </div>
-        ` : ''}
+        ` : `
+          <div style="background:rgba(255,255,255,0.02);border:1px dashed var(--border-subtle);padding:16px;border-radius:12px;text-align:center;">
+            <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:10px;">Esta palabra no tiene oraciones de ejemplo registradas todavía.</div>
+            <button class="btn btn-secondary" onclick="enrichModalWord(${w.id})" style="font-size:0.85rem;padding:7px 16px;">
+              ✨ Generar ejemplos bilingües (Tatoeba / Diccionario)
+            </button>
+          </div>
+        `}
       </div>
     </div>
   `;
@@ -1962,6 +1972,33 @@ function renderSettings() {
           </button>
         </div>
       </div>
+
+      <!-- Bilingual Examples Enrichment -->
+      <div class="glass" style="padding:24px;display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="font-size:1.8rem;">✨</div>
+          <div>
+            <h2 style="font-size:1.2rem;font-weight:700;">Ejemplos Bilingües Automáticos</h2>
+            <p style="font-size:0.85rem;color:var(--text-muted);">
+              Genera automáticamente oraciones de ejemplo bilingües (con traducción al español) para palabras en otros idiomas que no las tengan en el Excel (francés, portugués, italiano, alemán, inglés) y las guarda permanentemente en PostgreSQL.
+            </p>
+          </div>
+        </div>
+
+        <div style="background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);padding:16px;border-radius:12px;display:flex;flex-direction:column;gap:12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+            <div>
+              <div style="font-weight:600;font-size:0.95rem;">Generación masiva en segundo plano</div>
+              <div style="font-size:0.8rem;color:var(--text-muted);">
+                Usa el corpus bilingüe humano Tatoeba y definiciones de diccionario. Los ejemplos ya guardados se preservan siempre.
+              </div>
+            </div>
+            <button class="btn btn-primary" onclick="triggerBatchEnrichment()">
+              ⚡ Generar ejemplos para palabras pendientes
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -2104,6 +2141,40 @@ async function testRemindersNow() {
   }
 }
 
+async function enrichModalWord(wordId) {
+  notify('Buscando ejemplos bilingües en línea...', 'info');
+  try {
+    const res = await apiPost(`/api/words/${wordId}/enrich-examples`);
+    if (res.success && res.examples) {
+      notify(`¡${res.examples.length} ejemplos agregados y guardados en la BD!`, 'success');
+      if (STATE.selectedWord && STATE.selectedWord.id === wordId) {
+        STATE.selectedWord.examples = res.examples;
+      }
+      const inList = STATE.wordsList.find(w => w.id === wordId);
+      if (inList) inList.examples = res.examples;
+      renderApp();
+    } else {
+      notify(res.reason || 'No se encontraron ejemplos adicionales para esta palabra.', 'info');
+    }
+  } catch (err) {
+    notify('Error al buscar ejemplos', 'error');
+  }
+}
+
+async function triggerBatchEnrichment() {
+  notify('Iniciando generación de ejemplos en segundo plano...', 'info');
+  try {
+    const res = await apiPost('/api/words/enrich-examples', { limit: 250 });
+    if (res.success) {
+      notify(res.message || 'Proceso iniciado en segundo plano en el servidor.', 'success');
+    } else {
+      notify(res.message || res.error || 'No se pudo iniciar el proceso.', 'error');
+    }
+  } catch (err) {
+    notify('Error al solicitar generación de ejemplos', 'error');
+  }
+}
+
 // Global exposure for inline HTML event handlers
 window.startStudySession = startStudySession;
 window.startStudyLanguage = startStudyLanguage;
@@ -2125,6 +2196,8 @@ window.searchMoreImages = searchMoreImages;
 window.selectCardImage = selectCardImage;
 window.removeCardImage = removeCardImage;
 window.clearBadImagesCache = clearBadImagesCache;
+window.enrichModalWord = enrichModalWord;
+window.triggerBatchEnrichment = triggerBatchEnrichment;
 window.revealCard = revealCard;
 window.submitRating = submitRating;
 window.speak = speak;

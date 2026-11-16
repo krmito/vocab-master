@@ -11,11 +11,17 @@ Sistema web inteligente para el estudio de vocabulario basado en tus hojas de Ex
    - Sincronización incremental: **las palabras nuevas se añaden y las existentes se actualizan sin borrar nunca tu historial de repaso**.
    - También permite subir archivos directamente desde la interfaz web o sincronizar el archivo local del proyecto.
 
-2. **Repetición Espaciada (SM-2 / FSRS):**
+2. **Repetición Espaciada (SM-2 / FSRS) y Filtros de Estudio:**
    - Algoritmo que calcula el intervalo óptimo de repaso para cada palabra según tu calificación (*1: Otra vez, 2: Difícil, 3: Bien, 4: Fácil*).
+   - **Filtros por Dificultad:** Puedes elegir repasar solamente las difíciles (`🔥 Difíciles`, `🔄 Otra vez` o `😓 Difícil`), solo las fáciles (`⭐ Fáciles`), todas las palabras (`🌐 Todo`) o solo las pendientes del día (`⏰ Pendientes`).
+   - **Selección Personalizada:** En el Diccionario puedes marcar casillas (`☑️`) en las palabras específicas que desees y pulsar *"Estudiar selección"* para una sesión a medida.
    - Compatible con atajos de teclado (`Espacio` para ver traducción, `1-4` para calificar, `R` para repetir audio).
 
-3. **Forma Original, Lemas y Raíces (Wiktionary):**
+3. **Ejemplos Bilingües Automáticos en Base de Datos:**
+   - Para palabras en otros idiomas (**francés, portugués, italiano, alemán, inglés**) que no tengan oraciones de ejemplo en el Excel, el sistema busca automáticamente oraciones bilingües de alta calidad con traducción al español (mediante el corpus bilingüe humano Tatoeba y definiciones de diccionario) y las guarda permanentemente en la base de datos PostgreSQL.
+   - Las palabras que ya tengan ejemplos nunca se sobreescriben ni se pierden al volver a sincronizar.
+
+4. **Forma Original, Lemas y Raíces (Wiktionary):**
    - Si una palabra está conjugada (*ej: "vedo" o "plotted"*), el sistema consulta Wiktionary para mostrarte el **verbo o forma base en infinitivo** (*"vedere"*, *"plot"*), categoría gramatical y acepciones adicionales.
 
 4. **Pronunciación y Videos Reales:**
@@ -50,15 +56,21 @@ La app está diseñada para funcionar de inmediato en local sin necesidad de bas
 
 ---
 
-## ☁️ Despliegue en Railway
+## ☁️ Despliegue en Railway y Persistencia de Datos
 
-### Opción A: Desde GitHub (Recomendado)
-1. Sube este proyecto a un repositorio privado o público en tu cuenta de **GitHub**.
+### ⚠️ Persistencia de la Base de Datos (PostgreSQL vs SQLite)
+* **En contenedores de Railway (Nube):** El disco del contenedor de la aplicación web es efímero. Si usas SQLite sin un volumen montado, cada vez que haces un nuevo *deploy* (despliegue) de código o el contenedor se reinicia, el archivo `vocab.sqlite` vuelve al estado inicial y se pierden los repasos completados.
+* **Solución definitiva con PostgreSQL (100% Persistente):**
+  1. En tu proyecto de Railway, haz clic en el botón superior **+ New → Database → Add PostgreSQL**.
+  2. En tu servicio de la app web, ve a la pestaña **Variables** y vincula `DATABASE_URL` = `${{Postgres.DATABASE_URL}}` (Railway suele hacer esto automáticamente al conectar ambos servicios en el mismo proyecto).
+  3. ¡Listo! A partir de ese momento, la app detectará `DATABASE_URL` y usará PostgreSQL. Todos tus repasos, calificaciones, fechas de algoritmo SRS y ejemplos automáticos generados se guardarán permanentemente en la base de datos Postgres sin borrarse jamás entre despliegues.
+
+### Pasos para Desplegar:
+1. Sube este proyecto a un repositorio en tu cuenta de **GitHub**.
 2. Entra a [Railway.app](https://railway.app) y haz clic en **New Project → Deploy from GitHub repo**.
-3. (Opcional) En el proyecto de Railway, haz clic en **+ New → Database → Add PostgreSQL**. Railway inyectará automáticamente la variable `DATABASE_URL`.
-   *(Nota: si no añades PostgreSQL, la app usará SQLite automáticamente).*
-4. En la pestaña **Settings** de tu servicio en Railway, ve a **Networking → Generate Domain** para obtener tu enlace público `https://tu-app.up.railway.app`.
-5. Configura las variables de entorno en la pestaña **Variables** (guíate con la lista abajo).
+3. Añade la base de datos **PostgreSQL** (**+ New → Database → Add PostgreSQL**).
+4. En la pestaña **Settings** de tu servicio web en Railway, ve a **Networking → Generate Domain** para obtener tu enlace público `https://tu-app.up.railway.app`.
+5. Configura las variables de entorno en la pestaña **Variables** (ver tabla detallada abajo).
 
 ---
 
