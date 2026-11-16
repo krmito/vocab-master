@@ -14,7 +14,7 @@ import { importExcelFromFile, importExcelFromBuffer } from './excel.js';
 import { calculateNextReview } from './srs.js';
 import { lookupWord } from './wiktionary.js';
 import { getWordImage, searchImageCandidates, setWordImage, clearImageCache } from './images.js';
-import { checkAndSyncDrive, setupDriveWatch, getServiceAccountEmail } from './drive.js';
+import { checkAndSyncDrive, setupDriveWatch, getServiceAccountEmail, sanitizeDriveFolderId } from './drive.js';
 import { syncDailyCalendarEvent } from './calendar.js';
 import { sendDailyTelegramReminder, handleTelegramUpdate, startTelegramPolling, getBotToken, detectChatIdFromBot } from './telegram.js';
 import { startScheduler } from './scheduler.js';
@@ -636,7 +636,10 @@ app.post('/api/settings', async (req, res) => {
   try {
     const { reminderHour, folderId, calendarId, tgBotToken, tgChatId } = req.body;
     if (reminderHour !== undefined) await setSetting('reminder_hour', reminderHour);
-    if (folderId !== undefined) await setSetting('drive_folder_id', folderId);
+    if (folderId !== undefined) {
+      const cleanFolder = sanitizeDriveFolderId(folderId);
+      await setSetting('drive_folder_id', cleanFolder);
+    }
     if (calendarId !== undefined) await setSetting('calendar_id', calendarId);
     if (tgBotToken !== undefined && tgBotToken.trim() !== '' && !tgBotToken.includes('...')) {
       await setSetting('telegram_bot_token', tgBotToken.trim());

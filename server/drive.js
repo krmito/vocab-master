@@ -5,6 +5,19 @@ import { importExcelFromBuffer } from './excel.js';
 
 let driveClient = null;
 
+export function sanitizeDriveFolderId(input) {
+  if (!input || typeof input !== 'string') return '';
+  let clean = input.trim();
+  // If user pasted a full Google Drive URL: https://drive.google.com/drive/folders/1ABC_def-123...?usp=sharing
+  const urlMatch = clean.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+  if (urlMatch) {
+    clean = urlMatch[1];
+  }
+  // Strip quotes or trailing slashes
+  clean = clean.replace(/^['"]|['"]$/g, '').replace(/\/$/, '').trim();
+  return clean;
+}
+
 export function getDriveAuth() {
   const serviceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
 
@@ -71,9 +84,14 @@ export async function checkAndSyncDrive(force = false) {
     return { success: false, reason: 'Google Drive no está configurado (falta GOOGLE_SERVICE_ACCOUNT_KEY).' };
   }
 
-  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await getSetting('drive_folder_id'));
-  if (!folderId) {
-    return { success: false, reason: 'Falta configurar GOOGLE_DRIVE_FOLDER_ID.' };
+  const rawFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await getSetting('drive_folder_id'));
+  const folderId = sanitizeDriveFolderId(rawFolderId);
+
+  if (!folderId || folderId === '.' || folderId.length < 5) {
+    return {
+      success: false,
+      error: `El ID de la carpeta de Google Drive configurado ("${rawFolderId || ''}") no es válido. Debe ser el identificador alfanumérico de tu carpeta de Google Drive (ej: 1AbCdEfGhIjKlMnOpQrStUvWxYz) o la URL completa de la carpeta compartida en Drive. Si pusiste "." pensando en la carpeta local, para sincronizar archivos locales usa la opción "Sincronizar archivo local" o sube tu archivo Excel directamente en la web.`
+    };
   }
 
   try {
@@ -132,7 +150,12 @@ export async function checkAndSyncDrive(force = false) {
     };
   } catch (err) {
     console.error('[Drive] Error durante sincronización:', err);
-    return { success: false, error: err.message };
+    let errMsg = err.message || 'Error desconocido';
+    if (errMsg.includes('File not found') || err.code === 404) {
+      const saEmail = getServiceAccountEmail();
+      errMsg = `No se encontró la carpeta en Google Drive (ID: "${folderId}"). Posibles causas: 1) El ID de la carpeta no existe. 2) La carpeta en Google Drive NO ha sido compartida con la cuenta de servicio (${saEmail || 'tu cuenta de servicio'}). Abre tu carpeta en Google Drive, dale Compartir y añade ese correo con permiso de Lector.`;
+    }
+    return { success: false, error: errMsg };
   }
 }
 
@@ -141,8 +164,9 @@ export async function setupDriveWatch(appPublicUrl) {
   const drive = getDriveInstance();
   if (!drive || !appPublicUrl) return null;
 
-  const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await getSetting('drive_folder_id'));
-  if (!folderId) return null;
+  const rawFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await getSetting('drive_folder_id'));
+  const folderId = sanitizeDriveFolderId(rawFolderId);
+  if (!folderId || folderId === '.' || folderId.length < 5) return null;
 
   try {
     const channelId = `drive-watch-${Date.now()}`;
