@@ -69,6 +69,10 @@ export async function syncDailyCalendarEvent(appUrl = '', force = false) {
 
   const calendarId = await getCalendarId();
   const reminderHour = parseInt(process.env.REMINDER_HOUR || (await getSetting('reminder_hour')) || '9', 10);
+  const reminderDays = await getSetting('reminder_days', 'all');
+  const rangeType = await getSetting('reminder_range_type', 'unlimited');
+  const startDateSetting = await getSetting('reminder_start_date', '');
+  const endDateSetting = await getSetting('reminder_end_date', '');
   const saEmail = getServiceAccountEmail();
 
   if (!calendarId || calendarId === 'primary') {
@@ -95,12 +99,12 @@ export async function syncDailyCalendarEvent(appUrl = '', force = false) {
     let description = '';
 
     if (totalDue === 0) {
-      eventTitle = '📚 Repaso Vocabulario (Al día / Práctica libre)';
+      eventTitle = '📚 Repaso Diario de Vocabulario (VocabMaster)';
       description = [
         '🎉 ¡Excelente! No tienes palabras pendientes de repaso acumuladas.',
         'Abre tu aplicación para repasar vocabulario nuevo o explorar el diccionario.',
         '',
-        appUrl ? `🔗 Entrar a la app: ${appUrl}` : 'Abre tu aplicación para practicar.'
+        appUrl ? `🔗 Entrar a repasar: ${appUrl}` : 'Abre tu aplicación para practicar.'
       ].join('\n');
     } else {
       const breakdown = rows.map(r => `${r.lang.toUpperCase()}: ${r.count}`).join(' · ');
@@ -113,75 +117,104 @@ export async function syncDailyCalendarEvent(appUrl = '', force = false) {
       ].join('\n');
     }
 
-    // Determine target date (today if before reminder hour, tomorrow if reminder hour already passed)
+    // Determine target start date
     const { dateStr, isTomorrow } = getTargetEventDate(reminderHour, timeZone);
+    let effectiveStartDate = dateStr;
+    if (rangeType === 'range' && startDateSetting && startDateSetting > dateStr) {
+      effectiveStartDate = startDateSetting;
+    }
 
     const hStr = String(reminderHour).padStart(2, '0');
-    const startIso = `${dateStr}T${hStr}:00:00`;
+    const startIso = `${effectiveStartDate}T${hStr}:00:00`;
     const endH = reminderHour + 1 > 23 ? 23 : reminderHour;
     const endM = reminderHour + 1 > 23 ? '59' : '30';
-    const endIso = `${dateStr}T${String(endH).padStart(2, '0')}:${endM}:00`;
+    const endIso = `${effectiveStartDate}T${String(endH).padStart(2, '0')}:${endM}:00`;
 
-    // Search if an event already exists for that target date
-    const dayStart = `${dateStr}T00:00:00Z`;
-    const dayEnd = `${dateStr}T23:59:59Z`;
+    // Build RFC 5545 Recurrence Rule
+    let recurrence = [];
+    let rrule = 'RRULE:';
+    if (reminderDays === 'weekdays') {
+      rrule += 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR';
+    } else {
+      rrule += 'FREQ=DAILY';
+    }
 
+    if (rangeType === 'range' && endDateSetting) {
+      const cleanEnd = endDateSetting.replace(/-/g, '').trim();
+      rrule += `;UNTIL=${cleanEnd}T235959Z`;
+    }
+    recurrence.push(rrule);
+
+    // Search for existing events
     const searchRes = await calendar.events.list({
       calendarId,
-      timeMin: dayStart,
-      timeMax: dayEnd,
-      q: 'Repaso Vocabulario',
-      singleEvents: true
+      q: 'Repaso',
+      maxResults: 15
     });
 
-    const existingEvent = searchRes.data.items?.[0];
+    const items = searchRes.data.items || [];
+    let recurringEvent = items.find(e => Array.isArray(e.recurrence) && e.recurrence.length > 0 && (e.summary || '').includes('Vocabulario'));
 
-    let resultEvent;
-    if (existingEvent) {
-      // Update existing event
-      const updateRes = await calendar.events.patch({
-        calendarId,
-        eventId: existingEvent.id,
-        requestBody: {
-          summary: eventTitle,
-          description,
-          start: { dateTime: startIso, timeZone },
-          end: { dateTime: endIso, timeZone }
-        }
-      });
-      resultEvent = updateRes.data;
-      console.log(`[Calendar] Evento actualizado en ${calendarId} para ${dateStr} a las ${hStr}:00:`, eventTitle);
-    } else {
-      // Insert new event
-      const insertRes = await calendar.events.insert({
-        calendarId,
-        requestBody: {
-          summary: eventTitle,
-          description,
-          start: { dateTime: startIso, timeZone },
-          end: { dateTime: endIso, timeZone },
-          reminders: {
-            useDefault: false,
-            overrides: [
-              { method: 'popup', minutes: 10 },
-              { method: 'email', minutes: 30 }
-            ]
+    // Clean up any old non-recurring one-off test events so there are no duplicates
+    for (const item of items) {
+      if ((item.summary || '').includes('Vocabulario')) {
+        if (!recurringEvent || item.id !== recurringEvent.id) {
+          if (!Array.isArray(item.recurrence) || item.recurrence.length === 0) {
+            try {
+              await calendar.events.delete({ calendarId, eventId: item.id });
+            } catch (delErr) {}
           }
         }
+      }
+    }
+
+    const requestBody = {
+      summary: eventTitle,
+      description,
+      start: { dateTime: startIso, timeZone },
+      end: { dateTime: endIso, timeZone },
+      recurrence,
+      reminders: {
+        useDefault: false,
+        overrides: [
+          { method: 'popup', minutes: 10 },
+          { method: 'email', minutes: 30 }
+        ]
+      }
+    };
+
+    let resultEvent;
+    if (recurringEvent) {
+      const updateRes = await calendar.events.patch({
+        calendarId,
+        eventId: recurringEvent.id,
+        requestBody
+      });
+      resultEvent = updateRes.data;
+      console.log(`[Calendar] Serie recurrente (${recurrence[0]}) actualizada en ${calendarId}:`, eventTitle);
+    } else {
+      const insertRes = await calendar.events.insert({
+        calendarId,
+        requestBody
       });
       resultEvent = insertRes.data;
-      console.log(`[Calendar] Evento creado en ${calendarId} para ${dateStr} a las ${hStr}:00:`, eventTitle);
+      console.log(`[Calendar] Serie recurrente (${recurrence[0]}) creada en ${calendarId}:`, eventTitle);
     }
+
+    const frequencyDesc = reminderDays === 'weekdays' ? 'de lunes a viernes' : 'todos los días';
+    const limitDesc = rangeType === 'range' && endDateSetting ? `hasta el ${endDateSetting}` : 'sin límite (continuo)';
 
     return {
       success: true,
       event: resultEvent,
       htmlLink: resultEvent.htmlLink,
-      targetDate: dateStr,
+      targetDate: effectiveStartDate,
       targetTime: `${hStr}:00`,
       isTomorrow,
       calendarId,
-      message: `Evento agendado en Google Calendar para ${isTomorrow ? 'mañana' : 'hoy'} ${dateStr} a las ${hStr}:00.`
+      frequencyDesc,
+      limitDesc,
+      message: `Serie recurrente creada en Google Calendar para ${frequencyDesc} (${limitDesc}) a las ${hStr}:00.`
     };
   } catch (err) {
     console.error('[Calendar] Error al gestionar evento en Google Calendar:', err.message);

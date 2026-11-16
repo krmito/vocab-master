@@ -2167,7 +2167,7 @@ async function saveReminderSettings() {
   const res = await apiPost('/api/settings', payload);
   if (res && res.success) {
     if (res.calendar && res.calendar.success) {
-      notify(`✅ Ajustes guardados y evento agendado para ${res.calendar.isTomorrow ? 'mañana' : 'hoy'} (${res.calendar.targetDate}) a las ${res.calendar.targetTime}`, 'success');
+      notify(`✅ Ajustes guardados y serie agendada en Calendar (${res.calendar.frequencyDesc || 'recurrente'} a las ${res.calendar.targetTime})`, 'success');
     } else if (res.calendar && (res.calendar.error || res.calendar.reason)) {
       notify(`⚠️ Ajustes guardados, pero Calendar indicó: ${res.calendar.error || res.calendar.reason}`, 'error');
     } else {
@@ -2209,7 +2209,7 @@ async function testRemindersNow() {
     // Calendar check
     if (res.calendar?.success) {
       const cal = res.calendar;
-      notify(`✅ Google Calendar: ¡Evento agendado para ${cal.isTomorrow ? 'mañana' : 'hoy'} (${cal.targetDate}) a las ${cal.targetTime}!`, 'success');
+      notify(`✅ Google Calendar: ${cal.message || `¡Serie recurrente agendada ${cal.frequencyDesc || ''} a las ${cal.targetTime}!`}`, 'success');
     } else {
       notify(`⚠️ Calendar: ${res.calendar?.error || res.calendar?.reason || 'Error al conectar con Calendar'}`, 'error');
     }
