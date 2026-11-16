@@ -565,8 +565,8 @@ app.post('/api/sync/upload', async (req, res) => {
 app.post('/api/remind/now', async (req, res) => {
   try {
     const appUrl = getAppPublicUrl();
-    const calRes = await syncDailyCalendarEvent(appUrl);
-    const tgRes = await sendDailyTelegramReminder(appUrl);
+    const calRes = await syncDailyCalendarEvent(appUrl, true);
+    const tgRes = await sendDailyTelegramReminder(appUrl, true);
 
     res.json({
       success: true,
@@ -607,6 +607,11 @@ app.post('/webhooks/telegram', async (req, res) => {
 app.get('/api/settings', async (req, res) => {
   try {
     const reminderHour = await getSetting('reminder_hour', '9');
+    const reminderDays = await getSetting('reminder_days', 'all');
+    const reminderRangeType = await getSetting('reminder_range_type', 'unlimited');
+    const reminderStartDate = await getSetting('reminder_start_date', '');
+    const reminderEndDate = await getSetting('reminder_end_date', '');
+
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await getSetting('drive_folder_id', ''));
     const calendarId = process.env.GOOGLE_CALENDAR_ID || (await getSetting('calendar_id', ''));
     const botToken = await getBotToken();
@@ -619,6 +624,10 @@ app.get('/api/settings', async (req, res) => {
     res.json({
       success: true,
       reminderHour,
+      reminderDays,
+      reminderRangeType,
+      reminderStartDate,
+      reminderEndDate,
       folderId,
       calendarId,
       tgBotToken: botToken ? (botToken.length > 8 ? botToken.slice(0, 4) + '...' + botToken.slice(-4) : '******') : '',
@@ -636,8 +645,24 @@ app.get('/api/settings', async (req, res) => {
 
 app.post('/api/settings', async (req, res) => {
   try {
-    const { reminderHour, folderId, calendarId, tgBotToken, tgChatId } = req.body;
-    if (reminderHour !== undefined) await setSetting('reminder_hour', reminderHour);
+    const { 
+      reminderHour, 
+      reminderDays, 
+      reminderRangeType, 
+      reminderStartDate, 
+      reminderEndDate, 
+      folderId, 
+      calendarId, 
+      tgBotToken, 
+      tgChatId 
+    } = req.body;
+
+    if (reminderHour !== undefined) await setSetting('reminder_hour', String(reminderHour));
+    if (reminderDays !== undefined) await setSetting('reminder_days', String(reminderDays));
+    if (reminderRangeType !== undefined) await setSetting('reminder_range_type', String(reminderRangeType));
+    if (reminderStartDate !== undefined) await setSetting('reminder_start_date', String(reminderStartDate));
+    if (reminderEndDate !== undefined) await setSetting('reminder_end_date', String(reminderEndDate));
+
     if (folderId !== undefined) {
       const cleanFolder = sanitizeDriveFolderId(folderId);
       if (cleanFolder) await setSetting('drive_folder_id', cleanFolder);

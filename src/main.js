@@ -1926,20 +1926,67 @@ function renderSettings() {
           </div>
         </div>
 
-        <!-- Reminder Hour & Actions -->
-        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <label style="font-size:0.85rem;font-weight:600;">Hora del recordatorio:</label>
-            <select id="cfgReminderHour" style="background:#1e293b;border:1px solid var(--border-subtle);color:white;padding:8px 12px;border-radius:10px;cursor:pointer;">
-              ${Array.from({length: 24}).map((_, i) => `
-                <option value="${i}" ${parseInt(s.reminderHour || 9, 10) === i ? 'selected' : ''}>${String(i).padStart(2, '0')}:00</option>
-              `).join('')}
-            </select>
+        <!-- Schedule Configuration: Hour, Days, and Date Range -->
+        <div style="background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);padding:16px;border-radius:12px;display:flex;flex-direction:column;gap:16px;">
+          <div style="font-weight:700;font-size:0.95rem;">⏰ Programación y Frecuencia de Recordatorios</div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(200px, 1fr));gap:12px;">
+            <!-- Hour -->
+            <div>
+              <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:6px;">Hora del recordatorio:</label>
+              <select id="cfgReminderHour" class="input" style="width:100%;font-size:0.9rem;padding:9px 12px;background:#1e293b;border:1px solid var(--border-subtle);color:white;border-radius:10px;cursor:pointer;">
+                ${Array.from({length: 24}).map((_, i) => `
+                  <option value="${i}" ${parseInt(s.reminderHour || 9, 10) === i ? 'selected' : ''}>${String(i).padStart(2, '0')}:00</option>
+                `).join('')}
+              </select>
+            </div>
+
+            <!-- Days of Week -->
+            <div>
+              <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:6px;">Frecuencia de días:</label>
+              <select id="cfgReminderDays" class="input" style="width:100%;font-size:0.9rem;padding:9px 12px;background:#1e293b;border:1px solid var(--border-subtle);color:white;border-radius:10px;cursor:pointer;">
+                <option value="all" ${(s.reminderDays || 'all') === 'all' ? 'selected' : ''}>📅 Todos los días (Lunes a Domingo)</option>
+                <option value="weekdays" ${(s.reminderDays || 'all') === 'weekdays' ? 'selected' : ''}>💼 De lunes a viernes (Días laborables)</option>
+              </select>
+            </div>
+
+            <!-- Range Type -->
+            <div>
+              <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:6px;">Periodo / Duración:</label>
+              <select id="cfgReminderRangeType" onchange="toggleReminderDateInputs(this.value)" class="input" style="width:100%;font-size:0.9rem;padding:9px 12px;background:#1e293b;border:1px solid var(--border-subtle);color:white;border-radius:10px;cursor:pointer;">
+                <option value="unlimited" ${(s.reminderRangeType || 'unlimited') === 'unlimited' ? 'selected' : ''}>♾️ Sin límite (Continuo)</option>
+                <option value="range" ${(s.reminderRangeType || 'unlimited') === 'range' ? 'selected' : ''}>📆 Rango de fechas específico</option>
+              </select>
+            </div>
           </div>
 
-          <div style="display:flex;gap:8px;">
+          <!-- Date Range Pickers (Visible if range selected) -->
+          <div id="reminderDatePickersRow" style="display:${(s.reminderRangeType || 'unlimited') === 'range' ? 'grid' : 'none'};grid-template-columns:1fr 1fr;gap:12px;background:rgba(255,255,255,0.02);border:1px dashed var(--border-subtle);padding:14px;border-radius:10px;">
+            <div>
+              <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px;">Fecha de inicio (desde):</label>
+              <input 
+                type="date" 
+                id="cfgReminderStartDate" 
+                value="${s.reminderStartDate || ''}"
+                class="input"
+                style="width:100%;background:#1e293b;border:1px solid var(--border-subtle);color:white;padding:8px 12px;border-radius:8px;"
+              >
+            </div>
+            <div>
+              <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px;">Fecha límite (hasta):</label>
+              <input 
+                type="date" 
+                id="cfgReminderEndDate" 
+                value="${s.reminderEndDate || ''}"
+                class="input"
+                style="width:100%;background:#1e293b;border:1px solid var(--border-subtle);color:white;padding:8px 12px;border-radius:8px;"
+              >
+            </div>
+          </div>
+
+          <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:4px;">
             <button class="btn btn-primary" onclick="saveReminderSettings()">
-              💾 Guardar ajustes
+              💾 Guardar programación
             </button>
             <button class="btn btn-secondary" onclick="testRemindersNow()">
               🔔 Probar ahora
@@ -2085,20 +2132,38 @@ async function saveReminderHour(val) {
   await loadSettings();
 }
 
+function toggleReminderDateInputs(val) {
+  const row = document.getElementById('reminderDatePickersRow');
+  if (row) {
+    row.style.display = val === 'range' ? 'grid' : 'none';
+  }
+}
+
 async function saveReminderSettings() {
   const calendarId = document.getElementById('cfgCalendarId')?.value?.trim();
   const tgToken = document.getElementById('cfgTgToken')?.value?.trim();
   const tgChatId = document.getElementById('cfgTgChatId')?.value?.trim();
   const reminderHour = document.getElementById('cfgReminderHour')?.value;
+  const reminderDays = document.getElementById('cfgReminderDays')?.value;
+  const reminderRangeType = document.getElementById('cfgReminderRangeType')?.value;
+  const reminderStartDate = document.getElementById('cfgReminderStartDate')?.value;
+  const reminderEndDate = document.getElementById('cfgReminderEndDate')?.value;
 
-  const payload = { reminderHour };
+  const payload = {
+    reminderHour,
+    reminderDays,
+    reminderRangeType,
+    reminderStartDate: reminderRangeType === 'range' ? reminderStartDate : '',
+    reminderEndDate: reminderRangeType === 'range' ? reminderEndDate : ''
+  };
+
   if (calendarId !== undefined && calendarId !== '') payload.calendarId = calendarId;
   if (tgToken) payload.tgBotToken = tgToken;
   if (tgChatId) payload.tgChatId = tgChatId;
 
   const res = await apiPost('/api/settings', payload);
   if (res && res.success) {
-    notify('Ajustes de recordatorios guardados correctamente', 'success');
+    notify('Programación y recordatorios guardados correctamente', 'success');
   } else {
     notify(`Error al guardar: ${res?.error || 'Desconocido'}`, 'error');
   }
@@ -2226,6 +2291,7 @@ window.uploadExcelFile = uploadExcelFile;
 window.saveDriveFolder = saveDriveFolder;
 window.saveReminderHour = saveReminderHour;
 window.saveReminderSettings = saveReminderSettings;
+window.toggleReminderDateInputs = toggleReminderDateInputs;
 window.autoDetectTelegramChatId = autoDetectTelegramChatId;
 window.testRemindersNow = testRemindersNow;
 

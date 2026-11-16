@@ -1,5 +1,6 @@
 import { query, execute, getSetting, setSetting } from './db.js';
 import { calculateNextReview } from './srs.js';
+import { isReminderScheduledToday } from './scheduler.js';
 
 function escapeHtml(str) {
   if (!str) return '';
@@ -56,7 +57,7 @@ export async function callTelegram(method, payload = {}) {
   }
 }
 
-export async function sendDailyTelegramReminder(appUrl = '') {
+export async function sendDailyTelegramReminder(appUrl = '', force = false) {
   const token = await getBotToken();
   const chatId = await getChatId();
 
@@ -68,6 +69,14 @@ export async function sendDailyTelegramReminder(appUrl = '') {
       success: false,
       reason: `Falta configurar: ${missing.join(' y ')}. Asegúrate de que las variables estén en el servicio web en Railway (no en el servicio de Postgres) y de guardar los cambios.`
     };
+  }
+
+  if (!force) {
+    const timeZone = process.env.TIMEZONE || 'America/Bogota';
+    const check = await isReminderScheduledToday(timeZone);
+    if (!check.shouldRun) {
+      return { success: true, skipped: true, message: check.reason };
+    }
   }
 
   const nowIso = new Date().toISOString();

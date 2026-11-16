@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import { getDriveAuth, getServiceAccountEmail } from './drive.js';
 import { query, getSetting } from './db.js';
+import { isReminderScheduledToday } from './scheduler.js';
 
 let calendarClient = null;
 
@@ -12,15 +13,23 @@ export function getCalendarInstance() {
   return calendarClient;
 }
 
-export async function syncDailyCalendarEvent(appUrl = '') {
+export async function syncDailyCalendarEvent(appUrl = '', force = false) {
   const calendar = getCalendarInstance();
   if (!calendar) {
     return { success: false, reason: 'Google Calendar no configurado (falta cuenta de servicio).' };
   }
 
+  const timeZone = process.env.TIMEZONE || 'America/Bogota';
+
+  if (!force) {
+    const check = await isReminderScheduledToday(timeZone);
+    if (!check.shouldRun) {
+      return { success: true, skipped: true, message: check.reason };
+    }
+  }
+
   const calendarId = process.env.GOOGLE_CALENDAR_ID || (await getSetting('calendar_id'));
   const reminderHour = parseInt(process.env.REMINDER_HOUR || (await getSetting('reminder_hour')) || '9', 10);
-  const timeZone = process.env.TIMEZONE || 'America/Bogota';
   const saEmail = getServiceAccountEmail();
 
   if (!calendarId || calendarId === 'primary') {
