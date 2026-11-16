@@ -13,7 +13,24 @@ let pollingActive = false;
 let lastUpdateId = 0;
 
 export async function getBotToken() {
-  return process.env.TELEGRAM_BOT_TOKEN || (await getSetting('telegram_bot_token'));
+  const envToken = process.env.TELEGRAM_BOT_TOKEN
+    || process.env.TELEGRAM_TOKEN
+    || process.env.BOT_TOKEN
+    || process.env.TG_BOT_TOKEN;
+  const raw = envToken || (await getSetting('telegram_bot_token'));
+  if (!raw) return null;
+  return String(raw).replace(/^['"]|['"]$/g, '').trim();
+}
+
+export async function getChatId() {
+  const envChatId = process.env.TELEGRAM_CHAT_ID
+    || process.env.TELEGRAM_USER_ID
+    || process.env.CHAT_ID
+    || process.env.TG_CHAT_ID
+    || process.env.TELEGRAM_CHATID;
+  const raw = envChatId || (await getSetting('telegram_chat_id'));
+  if (!raw) return null;
+  return String(raw).replace(/^['"]|['"]$/g, '').trim();
 }
 
 export async function callTelegram(method, payload = {}) {
@@ -39,10 +56,16 @@ export async function callTelegram(method, payload = {}) {
 
 export async function sendDailyTelegramReminder(appUrl = '') {
   const token = await getBotToken();
-  const chatId = process.env.TELEGRAM_CHAT_ID || (await getSetting('telegram_chat_id'));
+  const chatId = await getChatId();
 
   if (!token || !chatId) {
-    return { success: false, reason: 'Falta TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID (puedes configurarlo en la pestaña Ajustes o en Variables de Railway)' };
+    const missing = [];
+    if (!token) missing.push('TELEGRAM_BOT_TOKEN (Token de BotFather)');
+    if (!chatId) missing.push('TELEGRAM_CHAT_ID (Tu ID de usuario)');
+    return {
+      success: false,
+      reason: `Falta configurar: ${missing.join(' y ')}. Asegúrate de que las variables estén en el servicio web en Railway (no en el servicio de Postgres) y de guardar los cambios.`
+    };
   }
 
   const nowIso = new Date().toISOString();

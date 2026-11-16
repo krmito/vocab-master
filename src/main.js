@@ -1881,11 +1881,17 @@ function renderSettings() {
         <div style="background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);padding:16px;border-radius:12px;display:flex;flex-direction:column;gap:12px;">
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div style="font-weight:700;font-size:0.95rem;">💬 Telegram Bot</div>
-            <div>${s.hasTelegram ? '<span style="color:#34d399;font-size:0.8rem;font-weight:700;">✅ Bot configurado</span>' : '<span style="color:#fbbf24;font-size:0.8rem;font-weight:700;">⚠️ Falta Bot Token</span>'}</div>
+            <div>
+              ${s.hasTelegram && s.hasChatId 
+                ? '<span style="color:#34d399;font-size:0.8rem;font-weight:700;">✅ Telegram 100% Conectado y Listo</span>' 
+                : s.hasTelegram 
+                  ? '<span style="color:#fbbf24;font-size:0.8rem;font-weight:700;">⚠️ Falta Chat ID</span>' 
+                  : '<span style="color:#f87171;font-size:0.8rem;font-weight:700;">⚠️ Falta Bot Token</span>'}
+            </div>
           </div>
 
-          <div style="font-size:0.8rem;color:var(--text-muted);">
-            Crea tu bot en Telegram con <b>@BotFather</b> y pega el token aquí. Para saber tu Chat ID escribe a <b>@userinfobot</b>.
+          <div style="font-size:0.8rem;color:var(--text-muted);line-height:1.4;">
+            Pega el token completo de <b>@BotFather</b> y tu Chat ID personal de <b>@userinfobot</b> (ej: <code>9028328272</code>).
           </div>
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
@@ -1894,18 +1900,19 @@ function renderSettings() {
               <input 
                 type="password" 
                 id="cfgTgToken" 
-                placeholder="${s.tgBotToken || 'Pega tu token de Telegram'}" 
+                placeholder="${s.hasTelegram ? '•••••••••••••••••••• (Guardado)' : 'Pega tu token completo'}" 
                 class="input"
                 style="width:100%;font-size:0.9rem;"
               >
+              ${s.hasTelegram ? `<div style="font-size:0.75rem;color:#34d399;margin-top:4px;">✅ Token activo: <code>${s.tgBotToken || 'Configurado'}</code></div>` : ''}
             </div>
             <div>
-              <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px;">Tu Chat ID (número):</label>
+              <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px;">Tu Chat ID (número personal):</label>
               <div style="display:flex;gap:6px;">
                 <input 
                   type="text" 
                   id="cfgTgChatId" 
-                  placeholder="Ej. 123456789" 
+                  placeholder="Ej. 9028328272" 
                   value="${s.tgChatId || ''}"
                   class="input"
                   style="flex:1;font-size:0.9rem;"
@@ -1914,6 +1921,7 @@ function renderSettings() {
                   🔍 Auto-detectar
                 </button>
               </div>
+              ${s.tgChatId ? `<div style="font-size:0.75rem;color:#34d399;margin-top:4px;">✅ Chat ID activo: <code>${s.tgChatId}</code></div>` : ''}
             </div>
           </div>
         </div>
@@ -2084,9 +2092,9 @@ async function saveReminderSettings() {
   const reminderHour = document.getElementById('cfgReminderHour')?.value;
 
   const payload = { reminderHour };
-  if (calendarId !== undefined) payload.calendarId = calendarId;
+  if (calendarId !== undefined && calendarId !== '') payload.calendarId = calendarId;
   if (tgToken) payload.tgBotToken = tgToken;
-  if (tgChatId !== undefined) payload.tgChatId = tgChatId;
+  if (tgChatId) payload.tgChatId = tgChatId;
 
   await apiPost('/api/settings', payload);
   notify('Ajustes de recordatorios guardados', 'success');

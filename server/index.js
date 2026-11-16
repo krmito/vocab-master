@@ -16,7 +16,7 @@ import { lookupWord } from './wiktionary.js';
 import { getWordImage, searchImageCandidates, setWordImage, clearImageCache } from './images.js';
 import { checkAndSyncDrive, setupDriveWatch, getServiceAccountEmail, sanitizeDriveFolderId } from './drive.js';
 import { syncDailyCalendarEvent } from './calendar.js';
-import { sendDailyTelegramReminder, handleTelegramUpdate, startTelegramPolling, getBotToken, detectChatIdFromBot } from './telegram.js';
+import { sendDailyTelegramReminder, handleTelegramUpdate, startTelegramPolling, getBotToken, getChatId, detectChatIdFromBot } from './telegram.js';
 import { startScheduler } from './scheduler.js';
 import { enrichWordInDb, enrichAllMissingExamples } from './examples.js';
 
@@ -609,22 +609,24 @@ app.get('/api/settings', async (req, res) => {
     const reminderHour = await getSetting('reminder_hour', '9');
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await getSetting('drive_folder_id', ''));
     const calendarId = process.env.GOOGLE_CALENDAR_ID || (await getSetting('calendar_id', ''));
-    const tgBotToken = process.env.TELEGRAM_BOT_TOKEN ? '********' : (await getSetting('telegram_bot_token', ''));
-    const tgChatId = process.env.TELEGRAM_CHAT_ID || (await getSetting('telegram_chat_id', ''));
+    const botToken = await getBotToken();
+    const tgChatId = await getChatId();
     const hasServiceAccount = Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
     const serviceAccountEmail = getServiceAccountEmail();
-    const hasTelegram = Boolean(process.env.TELEGRAM_BOT_TOKEN || (await getSetting('telegram_bot_token')));
+    const hasTelegram = Boolean(botToken);
+    const hasChatId = Boolean(tgChatId);
 
     res.json({
       success: true,
       reminderHour,
       folderId,
       calendarId,
-      tgBotToken: tgBotToken ? (tgBotToken.length > 8 ? tgBotToken.slice(0, 4) + '...' + tgBotToken.slice(-4) : '******') : '',
-      tgChatId,
+      tgBotToken: botToken ? (botToken.length > 8 ? botToken.slice(0, 4) + '...' + botToken.slice(-4) : '******') : '',
+      tgChatId: tgChatId || '',
       hasServiceAccount,
       serviceAccountEmail,
       hasTelegram,
+      hasChatId,
       appUrl: getAppPublicUrl()
     });
   } catch (err) {
@@ -638,15 +640,22 @@ app.post('/api/settings', async (req, res) => {
     if (reminderHour !== undefined) await setSetting('reminder_hour', reminderHour);
     if (folderId !== undefined) {
       const cleanFolder = sanitizeDriveFolderId(folderId);
-      await setSetting('drive_folder_id', cleanFolder);
+      if (cleanFolder) await setSetting('drive_folder_id', cleanFolder);
     }
-    if (calendarId !== undefined) await setSetting('calendar_id', calendarId);
-    if (tgBotToken !== undefined && tgBotToken.trim() !== '' && !tgBotToken.includes('...')) {
-      await setSetting('telegram_bot_token', tgBotToken.trim());
+    if (calendarId !== undefined && calendarId.trim() !== '') {
+      await setSetting('calendar_id', calendarId.trim());
+    }
+    if (tgBotToken !== undefined && tgBotToken.trim() !== '' && !tgBotToken.includes('...') && !tgBotToken.includes('•••')) {
+      const cleanToken = tgBotToken.trim().replace(/^['"]|['"]$/g, '');
+      await setSetting('telegram_bot_token', cleanToken);
       // Start telegram polling if not already running
       startTelegramPolling();
     }
-    if (tgChatId !== undefined) await setSetting('telegram_chat_id', tgChatId.trim());
+    // Only update chat ID if a non-empty value was provided so we never accidentally overwrite it with blank!
+    if (tgChatId !== undefined && tgChatId.trim() !== '') {
+      const cleanChatId = tgChatId.trim().replace(/^['"]|['"]$/g, '');
+      await setSetting('telegram_chat_id', cleanChatId);
+    }
 
     res.json({ success: true, message: 'Configuraciones guardadas' });
   } catch (err) {
