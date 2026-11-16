@@ -741,6 +741,8 @@ async function submitRating(wordId, rating) {
     STATE.currentCardIndex++;
     STATE.cardRevealed = false;
     STATE.wikiData = null;
+    STATE.pronunciationResult = null;
+    STATE.isListening = false;
     renderApp();
   } catch (err) {
     notify('Error guardando calificación', 'error');
