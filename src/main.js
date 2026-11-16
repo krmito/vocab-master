@@ -2096,8 +2096,12 @@ async function saveReminderSettings() {
   if (tgToken) payload.tgBotToken = tgToken;
   if (tgChatId) payload.tgChatId = tgChatId;
 
-  await apiPost('/api/settings', payload);
-  notify('Ajustes de recordatorios guardados', 'success');
+  const res = await apiPost('/api/settings', payload);
+  if (res && res.success) {
+    notify('Ajustes de recordatorios guardados correctamente', 'success');
+  } else {
+    notify(`Error al guardar: ${res?.error || 'Desconocido'}`, 'error');
+  }
   await loadSettings();
   renderApp();
 }

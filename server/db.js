@@ -222,7 +222,8 @@ export async function execute(sql, params = []) {
   if (isPostgres) {
     let pIdx = 1;
     let pgSql = sql.replace(/\?/g, () => `$${pIdx++}`);
-    if (/^\s*INSERT\s+INTO/i.test(pgSql) && !/RETURNING/i.test(pgSql)) {
+    // Only append RETURNING id for tables that have an auto-increment id column
+    if (/^\s*INSERT\s+INTO\s+(words|srs_cards|study_logs|wiktionary_cache)\b/i.test(pgSql) && !/RETURNING/i.test(pgSql)) {
       pgSql += ' RETURNING id';
     }
     const res = await dbClient.query(pgSql, params);

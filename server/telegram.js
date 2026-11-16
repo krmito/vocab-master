@@ -29,8 +29,11 @@ export async function getChatId() {
     || process.env.TG_CHAT_ID
     || process.env.TELEGRAM_CHATID;
   const raw = envChatId || (await getSetting('telegram_chat_id'));
-  if (!raw) return null;
-  return String(raw).replace(/^['"]|['"]$/g, '').trim();
+  if (raw && String(raw).trim() !== '') {
+    return String(raw).replace(/^['"]|['"]$/g, '').trim();
+  }
+  // Default to user's Telegram Chat ID from @userinfobot
+  return '9028328272';
 }
 
 export async function callTelegram(method, payload = {}) {
