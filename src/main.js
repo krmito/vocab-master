@@ -23,7 +23,15 @@ const STATE = {
   showConjugations: false,
   cardImage: null,
   loadingImage: false,
-  showImage: true,
+  showImage: localStorage.getItem('vocab_show_images') !== 'false',
+  imagePickerOpen: false,
+  imagePickerLoading: false,
+  imagePickerCandidates: [],
+  imagePickerWordId: null,
+  imagePickerWordText: '',
+  imagePickerTranslation: '',
+  imagePickerLang: 'en',
+  imagePickerSearchQuery: '',
   modalImage: null,
   settings: null,
   notification: null
@@ -300,6 +308,11 @@ async function apiPost(endpoint, body = {}) {
   return await res.json();
 }
 
+async function apiDelete(endpoint) {
+  const res = await fetch(endpoint, { method: 'DELETE' });
+  return await res.json();
+}
+
 // Initial Load
 async function init() {
   setupKeyboardShortcuts();
@@ -395,6 +408,9 @@ function renderApp() {
 
     <!-- Word Detail Modal -->
     ${STATE.selectedWord ? renderWordModal() : ''}
+
+    <!-- Image Picker Modal -->
+    ${STATE.imagePickerOpen ? renderImagePickerModal() : ''}
   `;
 }
 
@@ -718,21 +734,35 @@ function renderStudy() {
             ${STATE.showImage ? `
               <div style="margin:0 auto 16px auto;max-width:380px;">
                 ${STATE.loadingImage ? `
-                  <div style="height:160px;width:100%;background:rgba(255,255,255,0.02);border:1px dashed var(--border-subtle);border-radius:16px;display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:0.85rem;">
-                    Buscando imagen descriptiva...
+                  <div style="height:140px;width:100%;background:rgba(255,255,255,0.02);border:1px dashed var(--border-subtle);border-radius:16px;display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:0.85rem;">
+                    Buscando imagen... ⏳
                   </div>
                 ` : STATE.cardImage ? `
-                  <div style="overflow:hidden;border-radius:16px;border:1px solid var(--border-subtle);box-shadow:0 12px 30px rgba(0,0,0,0.5);max-height:200px;">
+                  <div style="position:relative;overflow:hidden;border-radius:16px;border:1px solid var(--border-subtle);box-shadow:0 12px 30px rgba(0,0,0,0.5);max-height:200px;background:#000;">
                     <img 
                       src="${STATE.cardImage}" 
                       alt="${card.word}" 
                       style="width:100%;height:180px;object-fit:cover;display:block;transition:transform 0.3s;"
-                      onmouseover="this.style.transform='scale(1.03)'"
+                      onmouseover="this.style.transform='scale(1.02)'"
                       onmouseout="this.style.transform='scale(1)'"
                       onerror="this.parentElement.style.display='none'"
                     >
+                    <div style="position:absolute;bottom:8px;right:8px;display:flex;gap:6px;">
+                      <button onclick="openImagePicker(${card.id}, '${card.word.replace(/'/g, "\\'")}', '${(card.translation||'').replace(/'/g, "\\'")}', '${card.lang}')" class="btn btn-secondary" style="padding:4px 9px;font-size:0.75rem;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,0.25);color:white;" title="Cambiar imagen">
+                        🔄 Cambiar
+                      </button>
+                      <button onclick="removeCardImage(${card.id})" class="btn btn-outline" style="padding:4px 9px;font-size:0.75rem;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,0.25);color:#f87171;" title="Quitar imagen">
+                        🗑️
+                      </button>
+                    </div>
                   </div>
-                ` : ''}
+                ` : `
+                  <div style="display:flex;justify-content:center;margin-bottom:8px;">
+                    <button onclick="openImagePicker(${card.id}, '${card.word.replace(/'/g, "\\'")}', '${(card.translation||'').replace(/'/g, "\\'")}', '${card.lang}')" class="btn btn-outline" style="font-size:0.8rem;padding:5px 12px;color:var(--text-muted);border:1px dashed var(--border-subtle);border-radius:12px;">
+                      🖼️ Elegir imagen descriptiva
+                    </button>
+                  </div>
+                `}
               </div>
             ` : ''}
 
@@ -940,12 +970,204 @@ async function loadCardImage(wordId) {
 
 function toggleShowImage() {
   STATE.showImage = !STATE.showImage;
+  localStorage.setItem('vocab_show_images', STATE.showImage ? 'true' : 'false');
   if (STATE.showImage && !STATE.cardImage) {
     const card = STATE.studyCards[STATE.currentCardIndex];
     if (card) loadCardImage(card.id);
   } else {
     renderApp();
   }
+}
+
+async function openImagePicker(wordId, wordText, translation, lang) {
+  STATE.imagePickerOpen = true;
+  STATE.imagePickerWordId = wordId;
+  STATE.imagePickerWordText = wordText;
+  STATE.imagePickerTranslation = translation || '';
+  STATE.imagePickerLang = lang || 'en';
+  STATE.imagePickerSearchQuery = '';
+  STATE.imagePickerCandidates = [];
+  STATE.imagePickerLoading = true;
+  renderApp();
+
+  try {
+    const res = await apiGet(`/api/words/${wordId}/image/candidates`);
+    if (res && res.candidates) {
+      STATE.imagePickerCandidates = res.candidates;
+    }
+  } catch (err) {
+    console.warn('Error loading image candidates:', err);
+  } finally {
+    STATE.imagePickerLoading = false;
+    renderApp();
+  }
+}
+
+function closeImagePicker() {
+  STATE.imagePickerOpen = false;
+  STATE.imagePickerWordId = null;
+  STATE.imagePickerCandidates = [];
+  renderApp();
+}
+
+async function searchMoreImages(customQuery) {
+  if (!STATE.imagePickerWordId) return;
+  STATE.imagePickerSearchQuery = customQuery;
+  STATE.imagePickerLoading = true;
+  renderApp();
+
+  try {
+    const res = await apiGet(`/api/words/${STATE.imagePickerWordId}/image/candidates?q=${encodeURIComponent(customQuery || '')}`);
+    if (res && res.candidates) {
+      STATE.imagePickerCandidates = res.candidates;
+    }
+  } catch (err) {
+    notify('Error buscando imágenes', 'error');
+  } finally {
+    STATE.imagePickerLoading = false;
+    renderApp();
+  }
+}
+
+async function selectCardImage(imageUrl) {
+  if (!STATE.imagePickerWordId || !imageUrl) return;
+  try {
+    await apiPost(`/api/words/${STATE.imagePickerWordId}/image`, { imageUrl });
+    
+    // Update active study card if matching
+    const currentCard = STATE.studyCards[STATE.currentCardIndex];
+    if (currentCard && currentCard.id === STATE.imagePickerWordId) {
+      STATE.cardImage = imageUrl;
+    }
+    if (STATE.selectedWord && STATE.selectedWord.id === STATE.imagePickerWordId) {
+      STATE.modalImage = imageUrl;
+    }
+
+    notify('¡Imagen guardada!', 'success');
+    closeImagePicker();
+  } catch (err) {
+    notify('Error al guardar imagen', 'error');
+  }
+}
+
+async function removeCardImage(wordId) {
+  const targetId = wordId || STATE.imagePickerWordId;
+  if (!targetId) return;
+  try {
+    await apiDelete(`/api/words/${targetId}/image`);
+    
+    const currentCard = STATE.studyCards[STATE.currentCardIndex];
+    if (currentCard && currentCard.id === targetId) {
+      STATE.cardImage = null;
+    }
+    if (STATE.selectedWord && STATE.selectedWord.id === targetId) {
+      STATE.modalImage = null;
+    }
+
+    notify('Imagen eliminada de esta palabra', 'info');
+    if (STATE.imagePickerOpen) closeImagePicker();
+    else renderApp();
+  } catch (err) {
+    notify('Error al eliminar imagen', 'error');
+  }
+}
+
+async function clearBadImagesCache() {
+  try {
+    await apiPost('/api/images/clear-cache');
+    STATE.cardImage = null;
+    STATE.modalImage = null;
+    notify('Caché de imágenes limpiada correctamente', 'success');
+    const currentCard = STATE.studyCards[STATE.currentCardIndex];
+    if (currentCard && STATE.showImage) {
+      loadCardImage(currentCard.id);
+    }
+  } catch (err) {
+    notify('Error al limpiar caché de imágenes', 'error');
+  }
+}
+
+function renderImagePickerModal() {
+  return `
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.8);backdrop-filter:blur(8px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;" onclick="closeImagePicker()">
+      <div class="card" onclick="event.stopPropagation()" style="max-width:620px;width:100%;max-height:88vh;display:flex;flex-direction:column;border:1px solid rgba(255,255,255,0.15);box-shadow:0 30px 60px rgba(0,0,0,0.8);border-radius:20px;overflow:hidden;background:#18181b;">
+        <div style="padding:18px 22px;border-bottom:1px solid var(--border-subtle);display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <h3 style="font-size:1.2rem;font-weight:800;margin:0;">🖼️ Imagen para: <span style="color:#38bdf8;">${STATE.imagePickerWordText}</span></h3>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin:3px 0 0 0;max-width:440px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${STATE.imagePickerTranslation ? `Significado: ${STATE.imagePickerTranslation}` : ''}</p>
+          </div>
+          <button onclick="closeImagePicker()" class="btn btn-outline" style="padding:4px 10px;font-size:1rem;">✕</button>
+        </div>
+
+        <div style="padding:18px 22px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;flex:1;">
+          <!-- Search Input -->
+          <form onsubmit="event.preventDefault();searchMoreImages(document.getElementById('imgSearchCustom').value);" style="display:flex;gap:8px;">
+            <input 
+              type="text" 
+              id="imgSearchCustom" 
+              class="input" 
+              placeholder="Buscar con otra palabra (ej: miedo, cobarde, correr, dibujo...)" 
+              value="${STATE.imagePickerSearchQuery || ''}"
+              style="flex:1;"
+            >
+            <button type="submit" class="btn btn-primary" style="padding:8px 16px;">Buscar</button>
+          </form>
+
+          <!-- Candidates Grid -->
+          <div>
+            <div style="font-size:0.8rem;font-weight:600;color:var(--text-muted);margin-bottom:8px;">
+              Haz clic en la imagen que mejor describa la palabra:
+            </div>
+            ${STATE.imagePickerLoading ? `
+              <div style="padding:40px;text-align:center;color:var(--text-muted);font-size:0.9rem;">
+                Buscando imágenes relevantes... ⏳
+              </div>
+            ` : STATE.imagePickerCandidates && STATE.imagePickerCandidates.length > 0 ? `
+              <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:10px;">
+                ${STATE.imagePickerCandidates.map((c) => `
+                  <div 
+                    onclick="selectCardImage('${c.image.replace(/'/g, "\\'")}')" 
+                    style="cursor:pointer;border-radius:12px;overflow:hidden;border:2px solid rgba(255,255,255,0.08);background:rgba(0,0,0,0.3);transition:all 0.2s;"
+                    onmouseover="this.style.borderColor='#38bdf8';this.style.transform='scale(1.03)'"
+                    onmouseout="this.style.borderColor='rgba(255,255,255,0.08)';this.style.transform='scale(1)'"
+                    title="${c.title || 'Seleccionar'}"
+                  >
+                    <img src="${c.thumbnail || c.image}" alt="${c.title}" style="width:100%;height:100px;object-fit:cover;display:block;" onerror="this.src='https://via.placeholder.com/150?text=Error'">
+                    <div style="padding:6px;font-size:0.7rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                      ${c.title}
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : `
+              <div style="padding:30px;text-align:center;color:var(--text-muted);font-size:0.85rem;background:rgba(255,255,255,0.02);border-radius:12px;">
+                No encontramos imágenes directas. Escribe una palabra clave en español o inglés en el buscador de arriba.
+              </div>
+            `}
+          </div>
+
+          <!-- Direct URL Option -->
+          <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:12px;">
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:6px;">O pega un enlace directo de internet:</div>
+            <div style="display:flex;gap:8px;">
+              <input type="url" id="customImgUrl" class="input" placeholder="https://ejemplo.com/foto.jpg" style="flex:1;font-size:0.85rem;">
+              <button class="btn btn-secondary" onclick="const u = document.getElementById('customImgUrl').value.trim(); if (u) selectCardImage(u);" style="padding:6px 14px;font-size:0.85rem;">Guardar</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div style="padding:14px 22px;border-top:1px solid var(--border-subtle);display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,0.2);">
+          <button class="btn btn-outline" onclick="removeCardImage(${STATE.imagePickerWordId})" style="color:#f87171;border-color:rgba(248,113,113,0.3);font-size:0.85rem;padding:6px 12px;">
+            🗑️ No usar imagen para esta palabra
+          </button>
+          <button class="btn btn-secondary" onclick="closeImagePicker()" style="padding:6px 16px;font-size:0.85rem;">
+            Cerrar
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 async function submitRating(wordId, rating) {
@@ -1161,10 +1383,24 @@ function renderWordModal() {
         </div>
 
         ${STATE.modalImage ? `
-          <div style="margin-bottom:16px;max-height:220px;overflow:hidden;border-radius:14px;border:1px solid var(--border-subtle);box-shadow:0 10px 25px rgba(0,0,0,0.4);">
+          <div style="position:relative;margin-bottom:16px;max-height:220px;overflow:hidden;border-radius:14px;border:1px solid var(--border-subtle);box-shadow:0 10px 25px rgba(0,0,0,0.4);background:#000;">
             <img src="${STATE.modalImage}" alt="${w.word}" style="width:100%;height:200px;object-fit:cover;display:block;" onerror="this.parentElement.style.display='none'">
+            <div style="position:absolute;bottom:8px;right:8px;display:flex;gap:6px;">
+              <button onclick="openImagePicker(${w.id}, '${w.word.replace(/'/g, "\\'")}', '${(w.translation||'').replace(/'/g, "\\'")}', '${w.lang}')" class="btn btn-secondary" style="padding:4px 9px;font-size:0.75rem;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,0.25);color:white;" title="Cambiar imagen">
+                🔄 Cambiar
+              </button>
+              <button onclick="removeCardImage(${w.id})" class="btn btn-outline" style="padding:4px 9px;font-size:0.75rem;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,0.25);color:#f87171;" title="Quitar imagen">
+                🗑️
+              </button>
+            </div>
           </div>
-        ` : ''}
+        ` : `
+          <div style="margin-bottom:14px;display:flex;justify-content:center;">
+            <button onclick="openImagePicker(${w.id}, '${w.word.replace(/'/g, "\\'")}', '${(w.translation||'').replace(/'/g, "\\'")}', '${w.lang}')" class="btn btn-outline" style="font-size:0.8rem;padding:5px 12px;color:var(--text-muted);border:1px dashed var(--border-subtle);border-radius:12px;">
+              🖼️ Añadir imagen descriptiva
+            </button>
+          </div>
+        `}
 
         <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap;">
           <button class="btn btn-secondary" onclick="speak('${w.word.replace(/'/g, "\\'")}', '${w.lang}')" style="padding:6px 14px;font-size:0.85rem;">
@@ -1336,6 +1572,39 @@ function renderSettings() {
           </button>
         </div>
       </div>
+
+      <!-- Vocabulary Images Settings -->
+      <div class="glass" style="padding:24px;display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="font-size:1.8rem;">🖼️</div>
+          <div>
+            <h2 style="font-size:1.2rem;font-weight:700;">Imágenes Descriptivas de Vocabulario</h2>
+            <p style="font-size:0.85rem;color:var(--text-muted);">
+              Controla la visualización de imágenes y limpia ilustraciones obsoletas o incorrectas.
+            </p>
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);padding:14px;border-radius:10px;flex-wrap:wrap;gap:10px;">
+          <div>
+            <div style="font-weight:600;font-size:0.95rem;">Mostrar imágenes en tarjetas de estudio</div>
+            <div style="font-size:0.8rem;color:var(--text-muted);">Puedes desactivarlas si prefieres estudiar solo con texto</div>
+          </div>
+          <button class="btn ${STATE.showImage ? 'btn-primary' : 'btn-outline'}" onclick="toggleShowImage()">
+            ${STATE.showImage ? '✅ Activadas' : '❌ Desactivadas'}
+          </button>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);padding:14px;border-radius:10px;flex-wrap:wrap;gap:10px;">
+          <div>
+            <div style="font-weight:600;font-size:0.95rem;">Limpiar caché de imágenes</div>
+            <div style="font-size:0.8rem;color:var(--text-muted);">Borra las imágenes que no coincidían para buscar nuevas y más acertadas</div>
+          </div>
+          <button class="btn btn-secondary" onclick="clearBadImagesCache()" style="color:#f87171;">
+            🧹 Limpiar caché
+          </button>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -1436,6 +1705,12 @@ window.startSpeechRecognition = startSpeechRecognition;
 window.toggleConjugations = toggleConjugations;
 window.toggleShowImage = toggleShowImage;
 window.loadCardImage = loadCardImage;
+window.openImagePicker = openImagePicker;
+window.closeImagePicker = closeImagePicker;
+window.searchMoreImages = searchMoreImages;
+window.selectCardImage = selectCardImage;
+window.removeCardImage = removeCardImage;
+window.clearBadImagesCache = clearBadImagesCache;
 window.revealCard = revealCard;
 window.submitRating = submitRating;
 window.speak = speak;

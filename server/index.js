@@ -8,7 +8,7 @@ import { initDb, query, execute, getSetting, setSetting, getDbInfo } from './db.
 import { importExcelFromFile, importExcelFromBuffer } from './excel.js';
 import { calculateNextReview } from './srs.js';
 import { lookupWord } from './wiktionary.js';
-import { getWordImage } from './images.js';
+import { getWordImage, searchImageCandidates, setWordImage, clearImageCache } from './images.js';
 import { checkAndSyncDrive, setupDriveWatch } from './drive.js';
 import { syncDailyCalendarEvent } from './calendar.js';
 import { sendDailyTelegramReminder, handleTelegramUpdate, startTelegramPolling } from './telegram.js';
@@ -286,15 +286,76 @@ app.get('/api/words/:id/wiktionary', async (req, res) => {
 app.get('/api/words/:id/image', async (req, res) => {
   try {
     const wordId = req.params.id;
-    const words = await query('SELECT lang, word FROM words WHERE id = ?', [wordId]);
+    const words = await query('SELECT lang, word, translation, tags FROM words WHERE id = ?', [wordId]);
     if (!words || words.length === 0) {
       return res.status(404).json({ success: false, error: 'Palabra no encontrada' });
     }
 
-    const { lang, word } = words[0];
-    const imgResult = await getWordImage(word, lang);
+    const { lang, word, translation, tags } = words[0];
+    const imgResult = await getWordImage(word, lang, translation, tags);
 
     res.json(imgResult);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5c. Search candidate images for a word
+app.get('/api/words/:id/image/candidates', async (req, res) => {
+  try {
+    const wordId = req.params.id;
+    const { q } = req.query;
+    const words = await query('SELECT lang, word, translation, tags FROM words WHERE id = ?', [wordId]);
+    if (!words || words.length === 0) {
+      return res.status(404).json({ success: false, error: 'Palabra no encontrada' });
+    }
+
+    const { lang, word, translation } = words[0];
+    const candidates = await searchImageCandidates(word, translation, lang, q);
+    res.json({ success: true, candidates });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5d. Set / override image for a word
+app.post('/api/words/:id/image', async (req, res) => {
+  try {
+    const wordId = req.params.id;
+    const { imageUrl } = req.body;
+    const words = await query('SELECT word FROM words WHERE id = ?', [wordId]);
+    if (!words || words.length === 0) {
+      return res.status(404).json({ success: false, error: 'Palabra no encontrada' });
+    }
+
+    const result = await setWordImage(words[0].word, imageUrl);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5e. Remove image for a word
+app.delete('/api/words/:id/image', async (req, res) => {
+  try {
+    const wordId = req.params.id;
+    const words = await query('SELECT word FROM words WHERE id = ?', [wordId]);
+    if (!words || words.length === 0) {
+      return res.status(404).json({ success: false, error: 'Palabra no encontrada' });
+    }
+
+    const result = await setWordImage(words[0].word, 'none');
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5f. Clear image cache entirely
+app.post('/api/images/clear-cache', async (req, res) => {
+  try {
+    const result = await clearImageCache();
+    res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
