@@ -56,6 +56,12 @@ app.get('/api/stats', async (req, res) => {
       GROUP BY state
     `);
 
+    const ratingStats = await query(`
+      SELECT CAST(COALESCE(difficulty, 0) AS INTEGER) as rating, COUNT(id) as count
+      FROM srs_cards
+      GROUP BY CAST(COALESCE(difficulty, 0) AS INTEGER)
+    `);
+
     const reviewsCount = await query('SELECT COUNT(id) as total FROM study_logs');
     const lastSync = await getSetting('drive_last_sync');
     const lastFileName = await getSetting('drive_file_name');
@@ -79,6 +85,7 @@ app.get('/api/stats', async (req, res) => {
       totals: totalWords,
       due: dueWords,
       states: stateStats,
+      ratings: ratingStats,
       totalReviews,
       tags: Array.from(allTags).sort(),
       dbInfo,
@@ -93,7 +100,7 @@ app.get('/api/stats', async (req, res) => {
 // 2. Words list with filters and pagination
 app.get('/api/words', async (req, res) => {
   try {
-    const { lang, tag, search, page = 1, limit = 50 } = req.query;
+    const { lang, tag, search, rating, page = 1, limit = 50 } = req.query;
     const offset = (parseInt(page, 10) - 1) * parseInt(limit, 10);
 
     const conditions = ['w.active = 1'];
@@ -115,13 +122,33 @@ app.get('/api/words', async (req, res) => {
       params.push(s, s, s);
     }
 
+    if (rating && rating !== 'all') {
+      if (rating === 'hard') {
+        conditions.push('c.difficulty IN (1, 2)');
+      } else if (rating === 'easy') {
+        conditions.push('c.difficulty = 4');
+      } else if (rating === 'new') {
+        conditions.push('(c.difficulty IS NULL OR c.difficulty = 0) AND (c.reps IS NULL OR c.reps = 0)');
+      } else if (rating === 'reviewed') {
+        conditions.push('(c.difficulty > 0 OR c.reps > 0)');
+      } else if (['1', '2', '3', '4'].includes(String(rating))) {
+        conditions.push('c.difficulty = ?');
+        params.push(parseInt(rating, 10));
+      }
+    }
+
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-    const countRes = await query(`SELECT COUNT(w.id) as total FROM words w ${whereClause}`, params);
-    const total = countRes[0]?.total || 0;
+    const countRes = await query(`
+      SELECT COUNT(w.id) as total
+      FROM words w
+      LEFT JOIN srs_cards c ON c.word_id = w.id
+      ${whereClause}
+    `, params);
+    const total = parseInt(countRes[0]?.total || 0, 10);
 
     const rows = await query(`
-      SELECT w.*, c.state, c.due, c.stability, c.scheduled_days, c.reps, c.lapses, c.last_review
+      SELECT w.*, c.state, c.due, c.stability, c.difficulty, c.scheduled_days, c.reps, c.lapses, c.last_review
       FROM words w
       LEFT JOIN srs_cards c ON c.word_id = w.id
       ${whereClause}
@@ -148,65 +175,128 @@ app.get('/api/words', async (req, res) => {
   }
 });
 
-// 3. Due study cards for session
+// 3. Study cards for session (with difficulty/rating filters, custom IDs, or full deck)
 app.get('/api/study/due', async (req, res) => {
   try {
-    const { lang, tag, limit = 30 } = req.query;
+    const { lang, tag, filter = 'due', ids, limit = 50 } = req.query;
     const nowIso = new Date().toISOString();
+    const parsedLimit = (limit === 'all' || parseInt(limit, 10) === 0) ? 5000 : (parseInt(limit, 10) || 50);
 
-    const conditions = ['w.active = 1', 'c.due <= ?'];
-    const params = [nowIso];
+    // Custom selected word IDs mode
+    if (ids && String(ids).trim()) {
+      const idList = String(ids)
+        .split(',')
+        .map(x => parseInt(x.trim(), 10))
+        .filter(n => !isNaN(n) && n > 0);
+
+      if (idList.length > 0) {
+        const customCards = await query(`
+          SELECT w.*, c.state, c.due, c.stability, c.difficulty, c.scheduled_days, c.reps, c.lapses, c.last_review
+          FROM srs_cards c
+          JOIN words w ON c.word_id = w.id
+          WHERE w.active = 1 AND w.id IN (${idList.join(',')})
+          ORDER BY w.id ASC
+        `);
+        const formattedCustom = customCards.map(r => {
+          let ex = [];
+          try { ex = JSON.parse(r.examples || '[]'); } catch (e) {}
+          return { ...r, examples: ex };
+        });
+        return res.json({
+          success: true,
+          count: formattedCustom.length,
+          cards: formattedCustom
+        });
+      }
+    }
+
+    const baseConditions = ['w.active = 1'];
+    const baseParams = [];
 
     if (lang && lang !== 'all') {
-      conditions.push('w.lang = ?');
-      params.push(lang.toLowerCase());
+      baseConditions.push('w.lang = ?');
+      baseParams.push(lang.toLowerCase());
     }
 
     if (tag) {
-      conditions.push('w.tags LIKE ?');
-      params.push(`%${tag}%`);
+      baseConditions.push('w.tags LIKE ?');
+      baseParams.push(`%${tag}%`);
     }
 
-    let cards = await query(`
-      SELECT w.*, c.state, c.due, c.stability, c.scheduled_days, c.reps, c.lapses, c.last_review
-      FROM srs_cards c
-      JOIN words w ON c.word_id = w.id
-      WHERE ${conditions.join(' AND ')}
-      ORDER BY c.due ASC
-      LIMIT ${parseInt(limit, 10)}
-    `, params);
+    let cards = [];
 
-    // If fewer cards due than limit, fetch some new cards (state = 0)
-    if (cards.length < parseInt(limit, 10)) {
-      const remainingLimit = parseInt(limit, 10) - cards.length;
-      const newConditions = ['w.active = 1', 'c.state = 0'];
-      const newParams = [];
+    if (filter === 'due') {
+      // Standard SRS mode: due cards first, then fill with new cards
+      const dueConditions = [...baseConditions, 'c.due <= ?'];
+      const dueParams = [...baseParams, nowIso];
 
-      if (lang && lang !== 'all') {
-        newConditions.push('w.lang = ?');
-        newParams.push(lang.toLowerCase());
-      }
-
-      if (tag) {
-        newConditions.push('w.tags LIKE ?');
-        newParams.push(`%${tag}%`);
-      }
-
-      const existingIds = cards.map(c => c.id);
-      if (existingIds.length > 0) {
-        newConditions.push(`w.id NOT IN (${existingIds.join(',')})`);
-      }
-
-      const newCards = await query(`
-        SELECT w.*, c.state, c.due, c.stability, c.scheduled_days, c.reps, c.lapses, c.last_review
+      cards = await query(`
+        SELECT w.*, c.state, c.due, c.stability, c.difficulty, c.scheduled_days, c.reps, c.lapses, c.last_review
         FROM srs_cards c
         JOIN words w ON c.word_id = w.id
-        WHERE ${newConditions.join(' AND ')}
-        ORDER BY w.id ASC
-        LIMIT ${remainingLimit}
-      `, newParams);
+        WHERE ${dueConditions.join(' AND ')}
+        ORDER BY c.due ASC
+        LIMIT ${parsedLimit}
+      `, dueParams);
 
-      cards = cards.concat(newCards);
+      if (cards.length < parsedLimit) {
+        const remainingLimit = parsedLimit - cards.length;
+        const newConditions = [...baseConditions, 'c.state = 0'];
+        const existingIds = cards.map(c => c.id);
+        if (existingIds.length > 0) {
+          newConditions.push(`w.id NOT IN (${existingIds.join(',')})`);
+        }
+
+        const newCards = await query(`
+          SELECT w.*, c.state, c.due, c.stability, c.difficulty, c.scheduled_days, c.reps, c.lapses, c.last_review
+          FROM srs_cards c
+          JOIN words w ON c.word_id = w.id
+          WHERE ${newConditions.join(' AND ')}
+          ORDER BY w.id ASC
+          LIMIT ${remainingLimit}
+        `, baseParams);
+
+        cards = cards.concat(newCards);
+      }
+    } else {
+      // Filtered mode (regardless of due date!)
+      const filterConditions = [...baseConditions];
+      const filterParams = [...baseParams];
+      let orderBy = 'w.id ASC';
+
+      if (filter === 'hard') {
+        filterConditions.push('c.difficulty IN (1, 2)');
+        orderBy = 'c.difficulty ASC, c.last_review DESC';
+      } else if (filter === 'rating_1') {
+        filterConditions.push('c.difficulty = 1');
+        orderBy = 'c.last_review DESC';
+      } else if (filter === 'rating_2') {
+        filterConditions.push('c.difficulty = 2');
+        orderBy = 'c.last_review DESC';
+      } else if (filter === 'rating_3') {
+        filterConditions.push('c.difficulty = 3');
+        orderBy = 'c.last_review DESC';
+      } else if (filter === 'easy' || filter === 'rating_4') {
+        filterConditions.push('c.difficulty = 4');
+        orderBy = 'c.last_review DESC';
+      } else if (filter === 'reviewed') {
+        filterConditions.push('(c.difficulty > 0 OR c.reps > 0)');
+        orderBy = 'c.last_review DESC';
+      } else if (filter === 'new') {
+        filterConditions.push('(c.difficulty IS NULL OR c.difficulty = 0) AND (c.reps IS NULL OR c.reps = 0)');
+        orderBy = 'w.id ASC';
+      } else if (filter === 'all') {
+        orderBy = 'w.id ASC';
+      }
+
+      cards = await query(`
+        SELECT w.*, c.state, c.due, c.stability, c.difficulty, c.scheduled_days, c.reps, c.lapses, c.last_review
+        FROM srs_cards c
+        JOIN words w ON c.word_id = w.id
+        WHERE ${filterConditions.join(' AND ')}
+        ORDER BY ${orderBy}
+        LIMIT ${parsedLimit}
+      `, filterParams);
     }
 
     const formatted = cards.map(r => {
@@ -243,9 +333,9 @@ app.post('/api/study/review', async (req, res) => {
 
     await execute(`
       UPDATE srs_cards
-      SET state = ?, stability = ?, scheduled_days = ?, reps = ?, lapses = ?, last_review = ?, due = ?
+      SET state = ?, stability = ?, difficulty = ?, scheduled_days = ?, reps = ?, lapses = ?, last_review = ?, due = ?
       WHERE word_id = ?
-    `, [next.state, next.stability, next.scheduled_days, next.reps, next.lapses, next.last_review, next.due, wordId]);
+    `, [next.state, next.stability, rating, next.scheduled_days, next.reps, next.lapses, next.last_review, next.due, wordId]);
 
     await execute(`
       INSERT INTO study_logs (word_id, rating, review_time)
@@ -254,7 +344,7 @@ app.post('/api/study/review', async (req, res) => {
 
     res.json({
       success: true,
-      card: next
+      card: { ...next, difficulty: rating }
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -522,6 +612,21 @@ if (fs.existsSync(distPath)) {
 async function start() {
   await initDb();
   console.log('[Server] Base de datos lista.');
+
+  // Backfill last rating (difficulty) from study_logs if needed
+  try {
+    await execute(`
+      UPDATE srs_cards
+      SET difficulty = (
+        SELECT l.rating FROM study_logs l
+        WHERE l.word_id = srs_cards.word_id
+        ORDER BY l.id DESC LIMIT 1
+      )
+      WHERE (difficulty IS NULL OR difficulty = 0) AND EXISTS (
+        SELECT 1 FROM study_logs l WHERE l.word_id = srs_cards.word_id
+      )
+    `);
+  } catch (e) {}
 
   // Auto-import local excel on first boot if DB is empty
   const wordCount = await query('SELECT COUNT(id) as total FROM words');

@@ -8,6 +8,9 @@ const STATE = {
   cardRevealed: false,
   studyLang: null, // null: must select language/tag first
   studyTag: '',    // optional tag filter
+  studyFilter: 'due', // 'due', 'all', 'hard', 'rating_1', 'rating_2', 'rating_3', 'easy', 'new', 'reviewed'
+  studyLimit: 50,     // 20, 50, 100, 0 (todas)
+  studyCustomIds: [], // manually selected word IDs
   isListening: false,
   pronunciationResult: null,
   wordsList: [],
@@ -17,6 +20,7 @@ const STATE = {
   filterLang: 'all',
   filterSearch: '',
   filterTag: '',
+  filterRating: 'all',
   selectedWord: null,
   wikiLoading: false,
   wikiData: null,
@@ -540,9 +544,31 @@ function renderDashboard() {
 }
 
 // ================= STUDY MODE =================
-async function startStudySession(lang = 'all', tag = '') {
+const STUDY_FILTERS = [
+  { id: 'due', label: '⏰ Pendientes', desc: 'Programadas para hoy + nuevas' },
+  { id: 'all', label: '🌐 Todo', desc: 'Todas las palabras sin límite de fecha' },
+  { id: 'hard', label: '🔥 Difíciles', desc: 'Calificadas en Otra vez o Difícil' },
+  { id: 'rating_1', label: '🔄 Otra vez', desc: 'Solo calificadas en Otra vez' },
+  { id: 'rating_2', label: '😓 Difícil', desc: 'Solo calificadas en Difícil' },
+  { id: 'rating_3', label: '👍 Bien', desc: 'Solo calificadas en Bien' },
+  { id: 'easy', label: '⭐ Fáciles', desc: 'Solo calificadas en Fácil' },
+  { id: 'new', label: '🆕 Nuevas', desc: 'Palabras aún no calificadas' }
+];
+
+function getRatingBadge(difficulty) {
+  const d = parseInt(difficulty || 0, 10);
+  if (d === 1) return { label: '🔄 Otra vez', color: '#f87171', bg: 'rgba(239,68,68,0.18)' };
+  if (d === 2) return { label: '😓 Difícil', color: '#fbbf24', bg: 'rgba(245,158,11,0.18)' };
+  if (d === 3) return { label: '👍 Bien', color: '#60a5fa', bg: 'rgba(59,130,246,0.18)' };
+  if (d === 4) return { label: '⭐ Fácil', color: '#34d399', bg: 'rgba(16,185,129,0.18)' };
+  return { label: '🆕 Nueva', color: '#9ca3af', bg: 'rgba(255,255,255,0.06)' };
+}
+
+async function startStudySession(lang = STATE.studyLang || 'all', tag = STATE.studyTag || '', filter = STATE.studyFilter || 'due', limit = STATE.studyLimit, customIds = null) {
   STATE.studyLang = lang;
   STATE.studyTag = tag;
+  STATE.studyFilter = filter;
+  if (limit !== undefined) STATE.studyLimit = limit;
   STATE.currentCardIndex = 0;
   STATE.cardRevealed = false;
   STATE.wikiData = null;
@@ -552,8 +578,15 @@ async function startStudySession(lang = 'all', tag = '') {
   STATE.cardImage = null;
 
   try {
-    const params = new URLSearchParams({ lang, limit: 50 });
+    const params = new URLSearchParams({
+      lang,
+      filter: STATE.studyFilter,
+      limit: STATE.studyLimit === 0 ? 'all' : String(STATE.studyLimit)
+    });
     if (tag) params.append('tag', tag);
+    if (customIds && customIds.length > 0) {
+      params.set('ids', customIds.join(','));
+    }
     const res = await apiGet(`/api/study/due?${params.toString()}`);
     if (res.success) {
       STATE.studyCards = res.cards;
@@ -567,6 +600,24 @@ async function startStudySession(lang = 'all', tag = '') {
   renderApp();
 }
 
+function changeStudyFilter(filter) {
+  STATE.studyFilter = filter;
+  if (STATE.studyLang) {
+    startStudySession(STATE.studyLang, STATE.studyTag, filter, STATE.studyLimit);
+  } else {
+    renderApp();
+  }
+}
+
+function changeStudyLimit(limit) {
+  STATE.studyLimit = parseInt(limit, 10);
+  if (STATE.studyLang) {
+    startStudySession(STATE.studyLang, STATE.studyTag, STATE.studyFilter, STATE.studyLimit);
+  } else {
+    renderApp();
+  }
+}
+
 function startStudyLanguage(lang, tag = '') {
   STATE.studyLang = lang;
   STATE.studyTag = tag;
@@ -578,37 +629,103 @@ function chooseDifferentLanguage() {
   STATE.studyTag = '';
   STATE.pronunciationResult = null;
   STATE.isListening = false;
-  renderApp();
+  loadStats().then(() => renderApp());
 }
 
 function renderStudy() {
+  const stats = STATE.stats || { totals: [], due: [], tags: [], ratings: [] };
+  const ratingsMap = {};
+  (stats.ratings || []).forEach(r => { ratingsMap[Number(r.rating)] = Number(r.count); });
+  const hardCount = (ratingsMap[1] || 0) + (ratingsMap[2] || 0);
+  const easyCount = ratingsMap[4] || 0;
+  const goodCount = ratingsMap[3] || 0;
+
   // If no language has been selected yet, show the Language & Tag Selection Screen
   if (!STATE.studyLang) {
-    const stats = STATE.stats || { totals: [], due: [], tags: [] };
     const langOrder = ['en', 'fr', 'de', 'it', 'pt'];
     const totalDueAll = stats.due.reduce((acc, r) => acc + Number(r.count), 0);
     const totalWordsAll = stats.totals.reduce((acc, r) => acc + Number(r.count), 0);
     const tags = stats.tags || [];
 
     return `
-      <div class="animate-fade-in" style="max-width:850px;margin:0 auto;display:flex;flex-direction:column;gap:28px;">
-        <div style="text-align:center;padding:10px 0 6px 0;">
-          <h1 style="font-size:2.2rem;font-weight:800;letter-spacing:-0.03em;margin-bottom:8px;">
+      <div class="animate-fade-in" style="max-width:880px;margin:0 auto;display:flex;flex-direction:column;gap:24px;">
+        <div style="text-align:center;padding:8px 0 4px 0;">
+          <h1 style="font-size:2.1rem;font-weight:800;letter-spacing:-0.03em;margin-bottom:6px;">
             ¿Qué deseas repasar hoy? 🌍
           </h1>
-          <p style="color:var(--text-muted);font-size:1.05rem;">
-            Elige un idioma o filtra por tus etiquetas y listas favoritas.
+          <p style="color:var(--text-muted);font-size:1rem;">
+            Filtra por dificultad (difíciles, fáciles, todas), cantidad de tarjetas, idioma o etiqueta.
           </p>
+        </div>
+
+        <!-- Difficulty & Limit Selector Box -->
+        <div class="glass" style="padding:20px 24px;border-radius:20px;display:flex;flex-direction:column;gap:16px;border:1px solid rgba(99,102,241,0.3);">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+            <div>
+              <div style="font-size:0.95rem;font-weight:700;color:white;">1️⃣ Filtro de palabras a incluir:</div>
+              <div style="font-size:0.8rem;color:var(--text-muted);">Elige si quieres repasar todo, solo las que calificaste como difíciles, fáciles o nuevas</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-size:0.8rem;color:var(--text-muted);font-weight:600;">Cantidad:</span>
+              ${[20, 50, 100, 0].map(lim => `
+                <button class="btn ${STATE.studyLimit === lim ? 'btn-primary' : 'btn-outline'}" style="padding:4px 10px;font-size:0.8rem;" onclick="changeStudyLimit(${lim})">
+                  ${lim === 0 ? 'Todas' : lim}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:8px;">
+            ${STUDY_FILTERS.map(f => {
+              let badgeCount = '';
+              if (f.id === 'hard' && hardCount > 0) badgeCount = ` (${hardCount})`;
+              else if (f.id === 'rating_1' && ratingsMap[1]) badgeCount = ` (${ratingsMap[1]})`;
+              else if (f.id === 'rating_2' && ratingsMap[2]) badgeCount = ` (${ratingsMap[2]})`;
+              else if (f.id === 'rating_3' && goodCount > 0) badgeCount = ` (${goodCount})`;
+              else if (f.id === 'easy' && easyCount > 0) badgeCount = ` (${easyCount})`;
+              return `
+                <button 
+                  class="btn ${STATE.studyFilter === f.id ? 'btn-primary' : 'btn-outline'}" 
+                  style="padding:7px 14px;font-size:0.85rem;border-radius:10px;" 
+                  onclick="changeStudyFilter('${f.id}')"
+                  title="${f.desc}"
+                >
+                  ${f.label}${badgeCount}
+                </button>
+              `;
+            }).join('')}
+          </div>
+
+          ${STATE.studyCustomIds.length > 0 ? `
+            <div style="background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.35);padding:12px 16px;border-radius:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+              <div style="font-size:0.9rem;color:#a7f3d0;font-weight:600;">
+                ☑️ Tienes <b>${STATE.studyCustomIds.length} palabras personalizadas</b> seleccionadas del Diccionario
+              </div>
+              <div style="display:flex;gap:8px;">
+                <button class="btn btn-primary" style="padding:6px 14px;font-size:0.85rem;background:#10b981;" onclick="studySelectedWordsNow()">
+                  🎯 Repasar mis ${STATE.studyCustomIds.length} seleccionadas →
+                </button>
+                <button class="btn btn-outline" style="padding:6px 10px;font-size:0.8rem;" onclick="clearCustomWordSelection()">
+                  Limpiar
+                </button>
+              </div>
+            </div>
+          ` : `
+            <div style="font-size:0.8rem;color:var(--text-dim);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+              <span>💡 Tip: También puedes elegir palabras específicas manualmente o marcarlas como difíciles/fáciles desde el Diccionario.</span>
+              <a href="#words" style="color:#818cf8;text-decoration:none;font-weight:600;">Ir al Diccionario →</a>
+            </div>
+          `}
         </div>
 
         <!-- Languages Selection Grid -->
         <div>
-          <h3 style="font-size:1.1rem;font-weight:700;margin-bottom:14px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;">
-            Por Idioma
+          <h3 style="font-size:1rem;font-weight:700;margin-bottom:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;">
+            2️⃣ Elige el Idioma para comenzar (${STUDY_FILTERS.find(f => f.id === STATE.studyFilter)?.label || 'Pendientes'})
           </h3>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">
             <!-- All Languages Card -->
-            <div class="glass" style="padding:22px;border-radius:20px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;justify-content:space-between;border:1px solid rgba(99,102,241,0.35);background:linear-gradient(135deg,rgba(99,102,241,0.18),rgba(6,182,212,0.12));" onclick="startStudySession('all')" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
+            <div class="glass" style="padding:22px;border-radius:20px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;justify-content:space-between;border:1px solid rgba(99,102,241,0.35);background:linear-gradient(135deg,rgba(99,102,241,0.18),rgba(6,182,212,0.12));" onclick="startStudySession('all', '', '${STATE.studyFilter}', ${STATE.studyLimit})" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
               <div>
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                   <span class="glass-pill" style="font-size:0.75rem;font-weight:700;color:#818cf8;background:rgba(99,102,241,0.25);">TODOS</span>
@@ -631,7 +748,7 @@ function renderStudy() {
               const info = LANGS[lang] || { name: lang.toUpperCase() };
 
               return `
-                <div class="glass" style="padding:22px;border-radius:20px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;justify-content:space-between;" onclick="startStudySession('${lang}')" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
+                <div class="glass" style="padding:22px;border-radius:20px;cursor:pointer;transition:all 0.2s;display:flex;flex-direction:column;justify-content:space-between;" onclick="startStudySession('${lang}', '', '${STATE.studyFilter}', ${STATE.studyLimit})" onmouseover="this.style.transform='translateY(-3px)'" onmouseout="this.style.transform='translateY(0)'">
                   <div>
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
                       <span class="lang-badge ${lang}">${lang}</span>
@@ -658,11 +775,11 @@ function renderStudy() {
               🏷️ Repasar por Etiquetas / Temas
             </h3>
             <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:16px;">
-              Haz clic en cualquiera de tus listas temáticas para repasar exclusivamente ese tema:
+              Haz clic en cualquiera de tus listas temáticas para repasar ese tema con el filtro seleccionado:
             </p>
             <div style="display:flex;flex-wrap:wrap;gap:8px;">
               ${tags.map(t => `
-                <button class="btn btn-outline" style="padding:6px 14px;font-size:0.85rem;border-radius:9999px;background:rgba(255,255,255,0.03);" onclick="startStudySession('all', '${t.replace(/'/g, "\\'")}')">
+                <button class="btn btn-outline" style="padding:6px 14px;font-size:0.85rem;border-radius:9999px;background:rgba(255,255,255,0.03);" onclick="startStudySession('all', '${t.replace(/'/g, "\\'")}', '${STATE.studyFilter}', ${STATE.studyLimit})">
                   🏷️ ${t}
                 </button>
               `).join('')}
@@ -675,20 +792,21 @@ function renderStudy() {
 
   const cards = STATE.studyCards || [];
   const card = cards[STATE.currentCardIndex];
+  const cardBadge = card ? getRatingBadge(card.difficulty) : null;
 
   return `
-    <div class="animate-fade-in" style="max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:20px;">
+    <div class="animate-fade-in" style="max-width:780px;margin:0 auto;display:flex;flex-direction:column;gap:14px;">
       <!-- Language & Tag Header -->
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
         <div style="display:flex;gap:6px;align-items:center;overflow-x:auto;padding-bottom:4px;">
           <button class="btn btn-outline" style="padding:6px 12px;font-size:0.85rem;" onclick="chooseDifferentLanguage()" title="Volver a elegir idioma o tag">
             ← Cambiar idioma/tag
           </button>
-          <button class="btn ${STATE.studyLang === 'all' && !STATE.studyTag ? 'btn-primary' : 'btn-outline'}" style="padding:6px 14px;font-size:0.85rem;" onclick="startStudySession('all')">
+          <button class="btn ${STATE.studyLang === 'all' && !STATE.studyTag ? 'btn-primary' : 'btn-outline'}" style="padding:6px 14px;font-size:0.85rem;" onclick="startStudySession('all', '${STATE.studyTag.replace(/'/g, "\\'")}', '${STATE.studyFilter}', ${STATE.studyLimit})">
             Todos
           </button>
           ${Object.keys(LANGS).map(l => `
-            <button class="btn ${STATE.studyLang === l ? 'btn-primary' : 'btn-outline'}" style="padding:6px 14px;font-size:0.85rem;" onclick="startStudySession('${l}')">
+            <button class="btn ${STATE.studyLang === l ? 'btn-primary' : 'btn-outline'}" style="padding:6px 14px;font-size:0.85rem;" onclick="startStudySession('${l}', '${STATE.studyTag.replace(/'/g, "\\'")}', '${STATE.studyFilter}', ${STATE.studyLimit})">
               ${LANGS[l].name}
             </button>
           `).join('')}
@@ -699,26 +817,59 @@ function renderStudy() {
         </div>
       </div>
 
+      <!-- Difficulty Filter & Limit Bar inside Study Session -->
+      <div class="glass" style="padding:10px 14px;border-radius:14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span style="font-size:0.75rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;margin-right:4px;">Filtro:</span>
+          ${STUDY_FILTERS.map(f => `
+            <button 
+              class="btn ${STATE.studyFilter === f.id ? 'btn-primary' : 'btn-outline'}" 
+              style="padding:4px 10px;font-size:0.78rem;border-radius:8px;" 
+              onclick="changeStudyFilter('${f.id}')"
+              title="${f.desc}"
+            >
+              ${f.label}
+            </button>
+          `).join('')}
+        </div>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:0.75rem;color:var(--text-dim);font-weight:700;">Límite:</span>
+          ${[20, 50, 100, 0].map(lim => `
+            <button class="btn ${STATE.studyLimit === lim ? 'btn-secondary' : 'btn-outline'}" style="padding:3px 8px;font-size:0.75rem;border-radius:6px;" onclick="changeStudyLimit(${lim})">
+              ${lim === 0 ? 'Todas' : lim}
+            </button>
+          `).join('')}
+        </div>
+      </div>
+
       <!-- Main Study Card -->
       ${!card ? `
-        <div class="glass" style="padding:60px 30px;text-align:center;">
+        <div class="glass" style="padding:50px 30px;text-align:center;">
           <div style="font-size:3rem;margin-bottom:12px;">🎉</div>
-          <h2 style="font-size:1.6rem;font-weight:800;margin-bottom:8px;">¡Completaste tu sesión de repaso!</h2>
-          <p style="color:var(--text-muted);max-width:450px;margin:0 auto 24px auto;">
-            Has repasado todas las palabras pendientes para este filtro. ¡Excelente constancia!
+          <h2 style="font-size:1.5rem;font-weight:800;margin-bottom:8px;">
+            ${cards.length === 0 ? 'No hay tarjetas con este filtro todavía' : '¡Completaste tu sesión de repaso!'}
+          </h2>
+          <p style="color:var(--text-muted);max-width:480px;margin:0 auto 24px auto;">
+            ${cards.length === 0 
+              ? 'Aún no tienes palabras calificadas en esta categoría o para este idioma. Prueba cambiando el filtro arriba a "🌐 Todo" o califica palabras en el Diccionario.' 
+              : 'Has repasado todas las palabras de esta lista. ¡Excelente trabajo!'}
           </p>
-          <div style="display:flex;justify-content:center;gap:12px;">
-            <button class="btn btn-primary" onclick="startStudySession('all')">Repasar todos los idiomas</button>
-            <button class="btn btn-secondary" onclick="window.location.hash='words'">Explorar diccionario</button>
+          <div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="changeStudyFilter('all')">🌐 Repasar Todas las palabras</button>
+            <button class="btn btn-outline" onclick="changeStudyFilter('hard')">🔥 Ver Difíciles</button>
+            <button class="btn btn-secondary" onclick="window.location.hash='words'">📖 Elegir palabras en el Diccionario</button>
           </div>
         </div>
       ` : `
         <div class="glass" style="padding:36px;border-radius:24px;box-shadow:0 20px 40px -10px rgba(0,0,0,0.5);display:flex;flex-direction:column;gap:24px;">
           <!-- Card Top Bar -->
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-            <div style="display:flex;align-items:center;gap:8px;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
               <span class="lang-badge ${card.lang}">${card.lang}</span>
               ${card.tags ? `<span class="glass-pill" style="font-size:0.75rem;color:var(--text-muted);">${card.tags}</span>` : ''}
+              <span style="font-size:0.75rem;font-weight:700;padding:3px 9px;border-radius:999px;color:${cardBadge.color};background:${cardBadge.bg};">
+                ${cardBadge.label}
+              </span>
               <button onclick="toggleShowImage()" style="background:none;border:none;cursor:pointer;font-size:0.8rem;color:var(--text-muted);margin-left:4px;" title="Mostrar u ocultar imagen">
                 ${STATE.showImage ? '🖼️ Ocultar foto' : '🖼️ Ver foto'}
               </button>
@@ -1173,6 +1324,11 @@ function renderImagePickerModal() {
 async function submitRating(wordId, rating) {
   try {
     await apiPost('/api/study/review', { wordId, rating });
+    const currentCard = STATE.studyCards[STATE.currentCardIndex];
+    if (currentCard) {
+      currentCard.difficulty = rating;
+      currentCard.reps = (currentCard.reps || 0) + 1;
+    }
     STATE.currentCardIndex++;
     STATE.cardRevealed = false;
     STATE.wikiData = null;
@@ -1180,6 +1336,7 @@ async function submitRating(wordId, rating) {
     STATE.isListening = false;
     STATE.showConjugations = false;
     STATE.cardImage = null;
+    loadStats();
     renderApp();
 
     const nextCard = STATE.studyCards[STATE.currentCardIndex];
@@ -1222,6 +1379,7 @@ async function loadWords() {
     lang: STATE.filterLang,
     search: STATE.filterSearch,
     tag: STATE.filterTag,
+    rating: STATE.filterRating,
     page: STATE.wordsPage,
     limit: STATE.wordsLimit
   });
@@ -1238,36 +1396,116 @@ async function loadWords() {
   renderApp();
 }
 
+function toggleCustomWordSelection(wordId, event) {
+  if (event) event.stopPropagation();
+  const idx = STATE.studyCustomIds.indexOf(wordId);
+  if (idx >= 0) {
+    STATE.studyCustomIds.splice(idx, 1);
+  } else {
+    STATE.studyCustomIds.push(wordId);
+  }
+  renderApp();
+}
+
+function clearCustomWordSelection() {
+  STATE.studyCustomIds = [];
+  renderApp();
+}
+
+function studySelectedWordsNow() {
+  if (STATE.studyCustomIds.length === 0) return;
+  const idsToStudy = [...STATE.studyCustomIds];
+  STATE.currentTab = 'study';
+  window.location.hash = 'study';
+  startStudySession('all', '', 'all', 0, idsToStudy);
+}
+
+function studyCurrentFilteredWordsNow() {
+  let targetFilter = 'all';
+  if (STATE.filterRating === 'hard') targetFilter = 'hard';
+  else if (STATE.filterRating === '1') targetFilter = 'rating_1';
+  else if (STATE.filterRating === '2') targetFilter = 'rating_2';
+  else if (STATE.filterRating === '3') targetFilter = 'rating_3';
+  else if (STATE.filterRating === '4' || STATE.filterRating === 'easy') targetFilter = 'easy';
+  else if (STATE.filterRating === 'new') targetFilter = 'new';
+  else if (STATE.filterRating === 'reviewed') targetFilter = 'reviewed';
+
+  STATE.currentTab = 'study';
+  window.location.hash = 'study';
+  startStudySession(STATE.filterLang || 'all', STATE.filterTag || '', targetFilter, STATE.studyLimit);
+}
+
+async function quickRateWord(wordId, rating, event) {
+  if (event) event.stopPropagation();
+  try {
+    await apiPost('/api/study/review', { wordId, rating });
+    const w = STATE.wordsList.find(item => item.id === wordId);
+    if (w) {
+      w.difficulty = rating;
+      w.reps = (w.reps || 0) + 1;
+    }
+    if (STATE.selectedWord && STATE.selectedWord.id === wordId) {
+      STATE.selectedWord.difficulty = rating;
+      STATE.selectedWord.reps = (STATE.selectedWord.reps || 0) + 1;
+    }
+    const badge = getRatingBadge(rating);
+    notify(`Calificada como ${badge.label}`, 'success');
+    loadStats();
+    renderApp();
+  } catch (err) {
+    notify('Error al calificar palabra', 'error');
+  }
+}
+
 function renderWords() {
   return `
-    <div class="animate-fade-in" style="display:flex;flex-direction:column;gap:20px;">
+    <div class="animate-fade-in" style="display:flex;flex-direction:column;gap:20px;padding-bottom:${STATE.studyCustomIds.length > 0 ? '80px' : '0'};">
       <!-- Search & Filters Bar -->
       <div class="glass" style="padding:20px;display:flex;flex-direction:column;gap:16px;">
-        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
           <input 
             type="text" 
             placeholder="Buscar por palabra, traducción o ejemplo..." 
             value="${STATE.filterSearch}" 
             oninput="handleSearch(this.value)"
-            style="flex:1;min-width:260px;background:rgba(0,0,0,0.3);border:1px solid var(--border-subtle);color:white;padding:12px 16px;border-radius:10px;font-family:inherit;font-size:0.95rem;outline:none;"
+            style="flex:1;min-width:240px;background:rgba(0,0,0,0.3);border:1px solid var(--border-subtle);color:white;padding:12px 16px;border-radius:10px;font-family:inherit;font-size:0.95rem;outline:none;"
           >
-          <div style="display:flex;gap:8px;">
-            <select 
-              onchange="handleFilterLang(this.value)" 
-              style="background:#1e293b;border:1px solid var(--border-subtle);color:white;padding:12px 16px;border-radius:10px;font-family:inherit;cursor:pointer;outline:none;"
-            >
-              <option value="all" ${STATE.filterLang === 'all' ? 'selected' : ''}>Todos los idiomas</option>
-              <option value="en" ${STATE.filterLang === 'en' ? 'selected' : ''}>Inglés (EN)</option>
-              <option value="fr" ${STATE.filterLang === 'fr' ? 'selected' : ''}>Francés (FR)</option>
-              <option value="de" ${STATE.filterLang === 'de' ? 'selected' : ''}>Alemán (DE)</option>
-              <option value="it" ${STATE.filterLang === 'it' ? 'selected' : ''}>Italiano (IT)</option>
-              <option value="pt" ${STATE.filterLang === 'pt' ? 'selected' : ''}>Portugués (PT)</option>
-            </select>
-          </div>
+          <select 
+            onchange="handleFilterLang(this.value)" 
+            style="background:#1e293b;border:1px solid var(--border-subtle);color:white;padding:10px 14px;border-radius:10px;font-family:inherit;cursor:pointer;outline:none;"
+          >
+            <option value="all" ${STATE.filterLang === 'all' ? 'selected' : ''}>🌍 Todos los idiomas</option>
+            <option value="en" ${STATE.filterLang === 'en' ? 'selected' : ''}>Inglés (EN)</option>
+            <option value="fr" ${STATE.filterLang === 'fr' ? 'selected' : ''}>Francés (FR)</option>
+            <option value="de" ${STATE.filterLang === 'de' ? 'selected' : ''}>Alemán (DE)</option>
+            <option value="it" ${STATE.filterLang === 'it' ? 'selected' : ''}>Italiano (IT)</option>
+            <option value="pt" ${STATE.filterLang === 'pt' ? 'selected' : ''}>Portugués (PT)</option>
+          </select>
+
+          <select 
+            onchange="handleFilterRating(this.value)" 
+            style="background:#1e293b;border:1px solid var(--border-subtle);color:white;padding:10px 14px;border-radius:10px;font-family:inherit;cursor:pointer;outline:none;"
+          >
+            <option value="all" ${STATE.filterRating === 'all' ? 'selected' : ''}>📊 Todas las calificaciones</option>
+            <option value="hard" ${STATE.filterRating === 'hard' ? 'selected' : ''}>🔥 Difíciles (Otra vez + Difícil)</option>
+            <option value="1" ${STATE.filterRating === '1' ? 'selected' : ''}>🔄 Calificadas: Otra vez</option>
+            <option value="2" ${STATE.filterRating === '2' ? 'selected' : ''}>😓 Calificadas: Difícil</option>
+            <option value="3" ${STATE.filterRating === '3' ? 'selected' : ''}>👍 Calificadas: Bien</option>
+            <option value="4" ${STATE.filterRating === '4' ? 'selected' : ''}>⭐ Calificadas: Fácil</option>
+            <option value="new" ${STATE.filterRating === 'new' ? 'selected' : ''}>🆕 Nuevas (Sin calificar)</option>
+            <option value="reviewed" ${STATE.filterRating === 'reviewed' ? 'selected' : ''}>✅ Todas las ya calificadas</option>
+          </select>
+
+          <button class="btn btn-primary" onclick="studyCurrentFilteredWordsNow()" style="padding:10px 16px;font-size:0.9rem;">
+            🎯 Repasar este filtro (${STATE.wordsTotal.toLocaleString()}) →
+          </button>
         </div>
 
-        <div style="display:flex;align-items:center;justify-content:space-between;font-size:0.85rem;color:var(--text-muted);">
-          <div>Total encontrados: <b>${STATE.wordsTotal.toLocaleString()}</b> palabras</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;font-size:0.85rem;color:var(--text-muted);">
+          <div>
+            Total encontrados: <b>${STATE.wordsTotal.toLocaleString()}</b> palabras · 
+            <span style="color:#818cf8;">Marca con ☑️ las que quieras practicar o califícalas directo con 🔄 😓 👍 ⭐</span>
+          </div>
           <div style="display:flex;gap:8px;align-items:center;">
             <button class="btn btn-outline" style="padding:4px 10px;" ${STATE.wordsPage <= 1 ? 'disabled' : ''} onclick="changePage(-1)">← Anterior</button>
             <span>Pág. ${STATE.wordsPage}</span>
@@ -1278,29 +1516,73 @@ function renderWords() {
 
       <!-- Words Grid -->
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;">
-        ${STATE.wordsList.map(w => `
-          <div class="glass" style="padding:20px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;transition:transform 0.2s;" onclick="openWordModal(${w.id})" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-            <div>
-              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                <span class="lang-badge ${w.lang}">${w.lang}</span>
-                ${w.tags ? `<span class="glass-pill" style="font-size:0.75rem;color:var(--text-muted);">${w.tags}</span>` : ''}
-              </div>
-              <div style="display:flex;align-items:baseline;gap:8px;">
-                <span style="font-size:1.3rem;font-weight:800;letter-spacing:-0.02em;">${w.word}</span>
-                ${w.transcription ? `<span style="font-family:var(--font-mono);font-size:0.85rem;color:#818cf8;">/${w.transcription}/</span>` : ''}
-              </div>
-              <div style="color:#34d399;font-weight:600;font-size:0.95rem;margin-top:6px;">
-                ${w.translation}
-              </div>
-            </div>
+        ${STATE.wordsList.map(w => {
+          const isSelected = STATE.studyCustomIds.includes(w.id);
+          const badge = getRatingBadge(w.difficulty);
+          const curDiff = parseInt(w.difficulty || 0, 10);
 
-            <div style="border-top:1px solid var(--border-subtle);margin-top:14px;padding-top:10px;display:flex;align-items:center;justify-content:space-between;font-size:0.8rem;color:var(--text-dim);">
-              <span>${w.examples?.length ? `💬 ${w.examples.length} ejemplos` : 'Sin ejemplos'}</span>
-              <span style="color:${w.reps > 0 ? '#60a5fa' : 'var(--text-dim)'};">${w.reps > 0 ? `Repasado ${w.reps}x` : 'Nueva'}</span>
+          return `
+            <div 
+              class="glass" 
+              style="padding:18px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;transition:all 0.2s;border:${isSelected ? '2px solid #10b981' : '1px solid var(--border-subtle)'};background:${isSelected ? 'rgba(16,185,129,0.08)' : ''};" 
+              onclick="openWordModal(${w.id})" 
+              onmouseover="this.style.transform='translateY(-2px)'" 
+              onmouseout="this.style.transform='translateY(0)'"
+            >
+              <div>
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;">
+                  <div style="display:flex;align-items:center;gap:6px;">
+                    <input 
+                      type="checkbox" 
+                      ${isSelected ? 'checked' : ''} 
+                      onclick="toggleCustomWordSelection(${w.id}, event)" 
+                      title="Seleccionar esta palabra para mi repaso personalizado"
+                      style="width:17px;height:17px;cursor:pointer;accent-color:#10b981;"
+                    >
+                    <span class="lang-badge ${w.lang}">${w.lang}</span>
+                    ${w.tags ? `<span class="glass-pill" style="font-size:0.7rem;color:var(--text-muted);">${w.tags}</span>` : ''}
+                  </div>
+                  <span style="font-size:0.72rem;font-weight:700;padding:2px 8px;border-radius:999px;color:${badge.color};background:${badge.bg};">
+                    ${badge.label}
+                  </span>
+                </div>
+                <div style="display:flex;align-items:baseline;gap:8px;">
+                  <span style="font-size:1.25rem;font-weight:800;letter-spacing:-0.02em;">${w.word}</span>
+                  ${w.transcription ? `<span style="font-family:var(--font-mono);font-size:0.85rem;color:#818cf8;">/${w.transcription}/</span>` : ''}
+                </div>
+                <div style="color:#34d399;font-weight:600;font-size:0.95rem;margin-top:6px;">
+                  ${w.translation}
+                </div>
+              </div>
+
+              <div style="border-top:1px solid var(--border-subtle);margin-top:12px;padding-top:10px;display:flex;align-items:center;justify-content:space-between;font-size:0.78rem;color:var(--text-dim);">
+                <div style="display:flex;gap:4px;" onclick="event.stopPropagation()">
+                  <button onclick="quickRateWord(${w.id}, 1, event)" title="Marcar como Otra vez" style="background:${curDiff === 1 ? 'rgba(239,68,68,0.35)' : 'rgba(255,255,255,0.05)'};border:1px solid ${curDiff === 1 ? '#f87171' : 'transparent'};border-radius:6px;padding:3px 6px;cursor:pointer;font-size:0.75rem;">🔄</button>
+                  <button onclick="quickRateWord(${w.id}, 2, event)" title="Marcar como Difícil" style="background:${curDiff === 2 ? 'rgba(245,158,11,0.35)' : 'rgba(255,255,255,0.05)'};border:1px solid ${curDiff === 2 ? '#fbbf24' : 'transparent'};border-radius:6px;padding:3px 6px;cursor:pointer;font-size:0.75rem;">😓</button>
+                  <button onclick="quickRateWord(${w.id}, 3, event)" title="Marcar como Bien" style="background:${curDiff === 3 ? 'rgba(59,130,246,0.35)' : 'rgba(255,255,255,0.05)'};border:1px solid ${curDiff === 3 ? '#60a5fa' : 'transparent'};border-radius:6px;padding:3px 6px;cursor:pointer;font-size:0.75rem;">👍</button>
+                  <button onclick="quickRateWord(${w.id}, 4, event)" title="Marcar como Fácil" style="background:${curDiff === 4 ? 'rgba(16,185,129,0.35)' : 'rgba(255,255,255,0.05)'};border:1px solid ${curDiff === 4 ? '#34d399' : 'transparent'};border-radius:6px;padding:3px 6px;cursor:pointer;font-size:0.75rem;">⭐</button>
+                </div>
+                <span style="color:${w.reps > 0 ? '#60a5fa' : 'var(--text-dim)'};">${w.reps > 0 ? `Repasado ${w.reps}x` : 'Sin repasar'}</span>
+              </div>
             </div>
-          </div>
-        `).join('')}
+          `;
+        }).join('')}
       </div>
+
+      <!-- Floating Custom Selection Bar -->
+      ${STATE.studyCustomIds.length > 0 ? `
+        <div style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:800;background:#18181b;border:2px solid #10b981;box-shadow:0 20px 40px rgba(0,0,0,0.75);padding:12px 22px;border-radius:999px;display:flex;align-items:center;gap:14px;">
+          <span style="font-weight:700;color:#34d399;font-size:0.95rem;">
+            ☑️ ${STATE.studyCustomIds.length} palabra(s) seleccionada(s)
+          </span>
+          <button class="btn btn-primary" style="background:#10b981;padding:8px 18px;border-radius:999px;font-size:0.9rem;" onclick="studySelectedWordsNow()">
+            🎯 Repasar seleccionadas ahora →
+          </button>
+          <button class="btn btn-outline" style="padding:6px 12px;border-radius:999px;font-size:0.8rem;" onclick="clearCustomWordSelection()">
+            ✕ Limpiar
+          </button>
+        </div>
+      ` : ''}
     </div>
   `;
 }
@@ -1317,6 +1599,12 @@ function handleSearch(val) {
 
 function handleFilterLang(lang) {
   STATE.filterLang = lang;
+  STATE.wordsPage = 1;
+  loadWords();
+}
+
+function handleFilterRating(rating) {
+  STATE.filterRating = rating;
   STATE.wordsPage = 1;
   loadWords();
 }
@@ -1820,6 +2108,13 @@ async function testRemindersNow() {
 window.startStudySession = startStudySession;
 window.startStudyLanguage = startStudyLanguage;
 window.chooseDifferentLanguage = chooseDifferentLanguage;
+window.changeStudyFilter = changeStudyFilter;
+window.changeStudyLimit = changeStudyLimit;
+window.toggleCustomWordSelection = toggleCustomWordSelection;
+window.clearCustomWordSelection = clearCustomWordSelection;
+window.studySelectedWordsNow = studySelectedWordsNow;
+window.studyCurrentFilteredWordsNow = studyCurrentFilteredWordsNow;
+window.quickRateWord = quickRateWord;
 window.startSpeechRecognition = startSpeechRecognition;
 window.toggleConjugations = toggleConjugations;
 window.toggleShowImage = toggleShowImage;
@@ -1836,6 +2131,7 @@ window.speak = speak;
 window.loadWiktionary = loadWiktionary;
 window.handleSearch = handleSearch;
 window.handleFilterLang = handleFilterLang;
+window.handleFilterRating = handleFilterRating;
 window.changePage = changePage;
 window.openWordModal = openWordModal;
 window.closeWordModal = closeWordModal;

@@ -276,9 +276,9 @@ async function submitQuizRating(chatId, messageId, wordId, rating) {
 
   await execute(`
     UPDATE srs_cards
-    SET state = ?, stability = ?, scheduled_days = ?, reps = ?, lapses = ?, last_review = ?, due = ?
+    SET state = ?, stability = ?, difficulty = ?, scheduled_days = ?, reps = ?, lapses = ?, last_review = ?, due = ?
     WHERE word_id = ?
-  `, [next.state, next.stability, next.scheduled_days, next.reps, next.lapses, next.last_review, next.due, wordId]);
+  `, [next.state, next.stability, rating, next.scheduled_days, next.reps, next.lapses, next.last_review, next.due, wordId]);
 
   await execute(`
     INSERT INTO study_logs (word_id, rating, review_time)
