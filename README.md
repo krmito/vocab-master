@@ -87,31 +87,70 @@ Para que el servidor pueda leer tu carpeta de Drive y crear eventos en Calendar:
 
 ---
 
-### 2. Bot de Telegram
-Para recibir alertas diarias y repasar desde Telegram:
+### 2. Bot de Telegram (Paso a Paso Completo)
+Para recibir alertas diarias y repasar desde tu celular con mini-quizzes interactivos:
 
-1. Abre Telegram y busca al usuario [@BotFather](https://t.me/BotFather).
-2. Envía el comando `/newbot` y sigue las instrucciones para ponerle nombre y usuario.
-3. BotFather te dará un **Token** (ej: `7123456789:AAH...`).
-4. En Railway (o `.env`), define:
-   - `TELEGRAM_BOT_TOKEN`: el token entregado por BotFather.
-5. Inicia tu bot en Telegram enviándole `/start`. El servidor registrará tu chat automáticamente para enviarte los repasos.
-6. Comandos útiles en Telegram:
-   - `/repasar` o `/quiz`: inicia una sesión de repaso en el chat.
-   - `/stats`: muestra el total de palabras y tarjetas pendientes.
+#### Paso 1: Crear el Bot con `@BotFather`
+1. Abre Telegram y busca al usuario oficial **[@BotFather](https://t.me/BotFather)**.
+2. Envía el comando `/newbot`.
+3. Dale un nombre visible a tu bot (por ejemplo: `Mi Vocabulario`).
+4. Dale un nombre de usuario único terminado en `bot` (por ejemplo: `CarlosVocabMasterBot`).
+5. BotFather te responderá con tu **Token HTTP API**.
+   * **¿Qué es el Token?:** Es la clave completa que incluye los números iniciales, los dos puntos `:` y todas las letras.
+   * *Ejemplo real:* `7483920192:AAEfGhIjKlMnOpQrStUvWxYz_123456`
+   * **¡Copia todo el texto completo sin omitir los números del inicio!**
+
+#### Paso 2: Obtener tu "Chat ID" Personal (¡No el del bot!)
+Telegram necesita saber **a cuál usuario de Telegram debe escribirle**. Por eso el Chat ID es **tu número de identificación personal como usuario**, no el del bot:
+
+* **Método 1 (Automático en la app web — Recomendado):**
+  1. Abre tu bot recién creado en Telegram y pulsa el botón **"INICIAR"** (o envíale `/start` o cualquier mensaje como `hola`).
+  2. En la app web ve a la pestaña **Ajustes ⚙️**.
+  3. En la casilla *Tu Chat ID*, haz clic en el botón morado **`🔍 Auto-detectar`**.
+  4. El servidor leerá tu mensaje, guardará tu Chat ID numérico automáticamente y te responderá en Telegram con un saludo de bienvenida.
+
+* **Método 2 (Manual con `@userinfobot`):**
+  1. En Telegram, busca y abre el bot **[@userinfobot](https://t.me/userinfobot)**.
+  2. Pulsa **Iniciar**. Te responderá con tu información.
+  3. Copia el número que aparece junto a **`Id:`** (ejemplo: `9028328272`). Ese es tu Chat ID personal.
+
+#### Paso 3: Configurar las Credenciales
+Puedes configurarlo de cualquiera de estas dos formas:
+
+* **Opción A (Desde la propia Web App — Sin reiniciar servidor):**
+  1. Entra a tu app web y ve a la pestaña **Ajustes ⚙️**.
+  2. En **Bot Token**, pega el token completo de BotFather.
+  3. En **Tu Chat ID**, pon tu número de usuario (ej: `9028328272`).
+  4. Haz clic en **"💾 Guardar ajustes"**.
+  5. Haz clic en **"🔔 Probar ahora"** para recibir tu primer recordatorio interactivo.
+
+* **Opción B (Desde las Variables de Railway):**
+  En Railway → Tu Servicio Web → Pestaña **Variables** → **New Variable**:
+  * `TELEGRAM_BOT_TOKEN`: El token completo de BotFather (ej: `7483920192:AAEf...`).
+  * `TELEGRAM_CHAT_ID`: Tu ID numérico personal (ej: `9028328272`).
+
+> [!IMPORTANT]
+> **Regla de oro de Telegram:** Un bot **nunca** puede enviarte mensajes si no has entrado a su chat al menos una vez y presionado el botón **"INICIAR"** (o enviado `/start`). Si alguna vez el bot te da error *"chat not found"* o *"forbidden"*, simplemente abre el bot y envíale un mensaje para reactivar el canal.
+
+#### Comandos interactivos en Telegram:
+Una vez conectado, puedes interactuar directamente con tu bot desde Telegram:
+* `/start`: Inicia el bot y muestra el menú principal de opciones.
+* `/repasar` o `/quiz`: Envía una palabra al azar para adivinar con botón de *"👁️ Revelar significado"* y botones para calificar (*🔄 Otra vez, 😓 Difícil, 👍 Bien, ⭐ Fácil*). Al calificarla, se reprograma en el algoritmo SRS igual que en la web.
+* `/stats`: Muestra cuántas palabras tienes en total y cuántas pendientes por idioma.
 
 ---
 
 ## 📋 Resumen de Variables de Entorno
 
-| Variable | Requerida | Descripción |
-|---|---|---|
-| `PORT` | Automática | Puerto del servidor (Railway lo asigna solo, en local 3000) |
-| `DATABASE_URL` | Opcional | URL de PostgreSQL (Railway lo autoconfigura al añadir Postgres) |
-| `RAILWAY_PUBLIC_DOMAIN` | Opcional | Tu dominio en Railway para webhooks y enlaces |
-| `GOOGLE_SERVICE_ACCOUNT_KEY` | Para Drive/Calendar | JSON completo de la clave de la cuenta de servicio |
-| `GOOGLE_DRIVE_FOLDER_ID` | Para Drive | ID de la carpeta compartida donde guardas el Excel |
-| `GOOGLE_CALENDAR_ID` | Para Calendar | ID del calendario (por defecto `primary`) |
-| `TELEGRAM_BOT_TOKEN` | Para Telegram | Token de tu bot de @BotFather |
-| `REMINDER_HOUR` | Opcional | Hora para recordatorio diario (0 a 23, defecto: `9` para 9:00 AM) |
-| `TIMEZONE` | Opcional | Zona horaria (defecto: `America/Bogota`) |
+| Variable | Requerida | Ejemplo / Valor | Descripción |
+|---|---|---|---|
+| `PORT` | Automática | `3000` | Puerto asignado por Railway |
+| `DATABASE_URL` | Opcional | `postgresql://...` | Conexión a PostgreSQL (Railway lo autoconfigura al añadir Postgres) |
+| `RAILWAY_PUBLIC_DOMAIN` | Opcional | `mi-app.up.railway.app` | Dominio público de tu app para webhooks y enlaces |
+| `GOOGLE_SERVICE_ACCOUNT_KEY`| Para Drive/Calendar | `{"type": "service_account", ...}` | JSON completo de la clave de la cuenta de servicio de Google Cloud |
+| `GOOGLE_DRIVE_FOLDER_ID` | Para Drive | `1AbCdEfGhIjKlMnOp...` | ID de la carpeta compartida de Google Drive donde está tu archivo Excel |
+| `GOOGLE_CALENDAR_ID` | Para Calendar | `tu_correo@gmail.com` | Tu correo Gmail personal donde quieres que se agenden los eventos |
+| `TELEGRAM_BOT_TOKEN` | Para Telegram | `7483920192:AAEf...` | Token completo proporcionado por @BotFather (con números y dos puntos) |
+| `TELEGRAM_CHAT_ID` | Para Telegram | `9028328272` | Tu ID numérico personal de usuario en Telegram (obtenido de @userinfobot) |
+| `REMINDER_HOUR` | Opcional | `9` | Hora del día para los recordatorios diarios (0 a 23, defecto: 9 = 9:00 AM) |
+| `TIMEZONE` | Opcional | `America/Bogota` | Zona horaria para sincronizar fechas y horas (defecto: `America/Bogota`) |
