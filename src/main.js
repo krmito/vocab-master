@@ -20,6 +20,7 @@ const STATE = {
   selectedWord: null,
   wikiLoading: false,
   wikiData: null,
+  showConjugations: false,
   settings: null,
   notification: null
 };
@@ -159,6 +160,81 @@ async function startSpeechRecognition(targetWord, lang) {
     notify('No se pudo iniciar el micrófono', 'error');
     renderApp();
   }
+}
+
+function toggleConjugations() {
+  STATE.showConjugations = !STATE.showConjugations;
+  renderApp();
+}
+
+function renderConjugationSection(wikiData, currentWord, lang) {
+  if (!wikiData) return '';
+  const conj = wikiData.conjugation;
+  const isVerb = wikiData.partsOfSpeech?.includes('Verb') ||
+                 wikiData.forms?.some(f => /verb|past|participle|pres|pret|fut|ind|pasado|presente|futuro/i.test(f)) ||
+                 (conj && Object.keys(conj.tenses || {}).length > 0);
+
+  if (!isVerb) return '';
+
+  const lemma = wikiData.lemma || currentWord;
+  const detected = conj?.currentFormDetected || (wikiData.forms?.length ? wikiData.forms.join(', ') : null);
+  const tenses = conj?.tenses || {};
+  const hasTenses = Object.keys(tenses).length > 0;
+
+  return `
+    <div style="margin-top:14px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.3);border-radius:12px;padding:14px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:0.75rem;font-weight:800;background:rgba(16,185,129,0.25);color:#34d399;padding:3px 8px;border-radius:6px;text-transform:uppercase;">
+            ⚡ Verbo
+          </span>
+          <span style="font-size:0.95rem;font-weight:700;color:white;">
+            Infinitivo / Base: <span style="color:#38bdf8;">${lemma}</span>
+          </span>
+          ${detected ? `<span style="font-size:0.8rem;color:#a7f3d0;background:rgba(16,185,129,0.18);padding:3px 8px;border-radius:6px;">Tiempo actual: <b>${detected}</b></span>` : ''}
+        </div>
+        <button class="btn btn-outline" onclick="toggleConjugations()" style="padding:6px 12px;font-size:0.85rem;color:#34d399;border-color:rgba(16,185,129,0.4);background:rgba(16,185,129,0.08);">
+          ${STATE.showConjugations ? '▲ Ocultar conjugaciones' : '📖 Ver conjugaciones (Presente, Pasado, Futuro)'}
+        </button>
+      </div>
+
+      ${STATE.showConjugations ? `
+        <div class="animate-fade-in" style="margin-top:14px;border-top:1px solid rgba(255,255,255,0.08);padding-top:12px;display:flex;flex-direction:column;gap:10px;">
+          ${hasTenses ? `
+            <div style="display:grid;grid-template-columns:1fr;gap:8px;">
+              ${Object.entries(tenses).map(([tenseName, tenseValue]) => {
+                const isCurrent = currentWord && tenseValue.toLowerCase().split(/[,\s]+/).includes(currentWord.toLowerCase());
+                return `
+                  <div style="display:flex;flex-direction:column;gap:3px;background:${isCurrent ? 'rgba(16,185,129,0.16)' : 'rgba(0,0,0,0.25)'};padding:10px 14px;border-radius:10px;border:1px solid ${isCurrent ? 'rgba(16,185,129,0.5)' : 'rgba(255,255,255,0.05)'};">
+                    <div style="font-size:0.75rem;font-weight:700;color:${isCurrent ? '#34d399' : 'var(--text-muted)'};text-transform:uppercase;letter-spacing:0.04em;">
+                      ${isCurrent ? '👉 [FORMA ACTUAL] ' : ''}${tenseName}
+                    </div>
+                    <div style="font-size:0.95rem;font-weight:600;color:${isCurrent ? '#a7f3d0' : 'white'};">
+                      ${tenseValue}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          ` : '<div style="font-size:0.85rem;color:var(--text-muted);">Tabla automática resumida no disponible. Consulta las matrices completas abajo:</div>'}
+
+          <!-- External conjugator links -->
+          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+            ${conj?.links?.reverso ? `
+              <a href="${conj.links.reverso}" target="_blank" class="btn btn-outline" style="padding:6px 12px;font-size:0.8rem;text-decoration:none;color:#60a5fa;border-color:rgba(96,165,250,0.3);">
+                🌐 Tabla completa en Reverso Conjugator ↗
+              </a>
+            ` : ''}
+            ${conj?.links?.wordreference ? `
+              <a href="${conj.links.wordreference}" target="_blank" class="btn btn-outline" style="padding:6px 12px;font-size:0.8rem;text-decoration:none;color:#a78bfa;border-color:rgba(167,139,250,0.3);">
+                📖 WordReference Conjugador ↗
+              </a>
+            ` : ''}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
 }
 
 // Notification toast helper
@@ -718,6 +794,7 @@ function renderStudy() {
                         `).join('')}
                       </div>
                     ` : '<div style="font-size:0.85rem;color:var(--text-muted);">Forma estándar confirmada.</div>'}
+                    ${renderConjugationSection(STATE.wikiData, card.word, card.lang)}
                   </div>
                 ` : `
                   <div style="font-size:0.85rem;color:var(--text-dim);">
@@ -792,6 +869,7 @@ async function submitRating(wordId, rating) {
     STATE.wikiData = null;
     STATE.pronunciationResult = null;
     STATE.isListening = false;
+    STATE.showConjugations = false;
     renderApp();
   } catch (err) {
     notify('Error guardando calificación', 'error');
@@ -1028,6 +1106,7 @@ function renderWordModal() {
                   `).join('')}
                 </div>
               ` : '<div style="font-size:0.85rem;color:var(--text-muted);">Forma estándar confirmada.</div>'}
+              ${renderConjugationSection(STATE.wikiData, w.word, w.lang)}
             </div>
           ` : `
             <div style="font-size:0.85rem;color:var(--text-dim);">No se encontraron desgloses gramaticales adicionales.</div>
@@ -1245,6 +1324,7 @@ window.startStudySession = startStudySession;
 window.startStudyLanguage = startStudyLanguage;
 window.chooseDifferentLanguage = chooseDifferentLanguage;
 window.startSpeechRecognition = startSpeechRecognition;
+window.toggleConjugations = toggleConjugations;
 window.revealCard = revealCard;
 window.submitRating = submitRating;
 window.speak = speak;

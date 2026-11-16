@@ -1,4 +1,5 @@
 import { query, execute } from './db.js';
+import { getVerbConjugations } from './conjugator.js';
 
 const LANG_MAP = {
   en: 'English',
@@ -20,7 +21,12 @@ export async function lookupWord(lang, word) {
       [cleanLang, cleanWord]
     );
     if (cached && cached.length > 0) {
-      return JSON.parse(cached[0].data_json);
+      const data = JSON.parse(cached[0].data_json);
+      // Ensure conjugation is attached even if cache was from older version
+      if (!data.conjugation) {
+        data.conjugation = getVerbConjugations(cleanLang, cleanWord, data.lemma || cleanWord);
+      }
+      return data;
     }
   } catch (err) {
     console.error('[Wiktionary] Cache read error:', err.message);
@@ -38,17 +44,22 @@ export async function lookupWord(lang, word) {
     });
 
     if (!res.ok) {
-      return { found: false, word: cleanWord, lang: cleanLang };
+      const fallback = { found: false, word: cleanWord, lang: cleanLang };
+      fallback.conjugation = getVerbConjugations(cleanLang, cleanWord, cleanWord);
+      return fallback;
     }
 
     const data = await res.json();
     const wikitext = data.parse?.wikitext?.['*'];
 
     if (!wikitext) {
-      return { found: false, word: cleanWord, lang: cleanLang };
+      const fallback = { found: false, word: cleanWord, lang: cleanLang };
+      fallback.conjugation = getVerbConjugations(cleanLang, cleanWord, cleanWord);
+      return fallback;
     }
 
     const parsed = parseWikitext(wikitext, targetLangHeader, cleanWord);
+    parsed.conjugation = getVerbConjugations(cleanLang, cleanWord, parsed.lemma || cleanWord);
 
     // Save to cache
     try {
@@ -64,12 +75,14 @@ export async function lookupWord(lang, word) {
     return parsed;
   } catch (err) {
     console.warn(`[Wiktionary] Lookup failed for ${cleanWord} (${cleanLang}):`, err.message);
-    return {
+    const fallback = {
       found: false,
       word: cleanWord,
       lang: cleanLang,
       error: err.message
     };
+    fallback.conjugation = getVerbConjugations(cleanLang, cleanWord, cleanWord);
+    return fallback;
   }
 }
 
@@ -90,14 +103,37 @@ function parseWikitext(text, langSection, originalWord) {
     forms: []
   };
 
-  // Find inflections / lemma:
-  // e.g. {{inflection of|it|vedere||1|s|pres|ind}} or {{form of|...}}
-  const inflectionRegex = /\{\{(?:inflection of|form of|past participle of|present participle of|plural of|feminine of)\|[^|]*\|([^|}]+)(?:\|([^}]+))?\}\}/i;
+  // Find English specific inflections
+  const enPastMatch = sectionText.match(/\{\{en-past of\|([^|}]+)/i);
+  if (enPastMatch) {
+    result.lemma = enPastMatch[1].trim();
+    result.forms.push('Pasado simple y participio');
+  }
+
+  const enIngMatch = sectionText.match(/\{\{en-ing form of\|([^|}]+)/i);
+  if (enIngMatch) {
+    result.lemma = enIngMatch[1].trim();
+    result.forms.push('Gerundio / Progresivo (-ing)');
+  }
+
+  const enThirdMatch = sectionText.match(/\{\{en-third-person singular of\|([^|}]+)/i);
+  if (enThirdMatch) {
+    result.lemma = enThirdMatch[1].trim();
+    result.forms.push('3ª persona singular presente');
+  }
+
+  // Find general inflections / lemma:
+  // e.g. {{infl of|en|plot||ed-form}} or {{inflection of|it|vedere||1|s|pres|ind}} or {{form of|...}}
+  const inflectionRegex = /\{\{(?:infl of|inflection of|form of|past participle of|present participle of|plural of|feminine of|[a-z]{2,3}-verb(?:-form)?-of)\|[^|]*\|([^|}]+)(?:\|([^}]+))?\}\}/i;
   const inflMatch = sectionText.match(inflectionRegex);
-  if (inflMatch) {
-    result.lemma = inflMatch[1];
+  if (inflMatch && !result.lemma) {
+    result.lemma = inflMatch[1].trim();
     if (inflMatch[2]) {
-      result.forms.push(inflMatch[2].replace(/\|/g, ' '));
+      let rawForm = inflMatch[2].replace(/\|+/g, ' ').trim();
+      if (/ed-form/i.test(rawForm)) rawForm = 'Pasado simple y participio pasado (-ed)';
+      else if (/ing-form/i.test(rawForm)) rawForm = 'Gerundio / Progresivo (-ing)';
+      else if (/s-form/i.test(rawForm)) rawForm = '3ª persona singular presente (-s)';
+      result.forms.push(rawForm);
     }
   }
 
