@@ -74,10 +74,33 @@ function evaluatePronunciation(targetWord, spokenText) {
   }
 }
 
-function startSpeechRecognition(targetWord, lang) {
+let activeRecognition = null;
+
+async function startSpeechRecognition(targetWord, lang) {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
     notify('Tu navegador no soporta reconocimiento de voz (prueba en Chrome o Edge)', 'error');
+    return;
+  }
+
+  // If already listening, stop it
+  if (activeRecognition) {
+    try { activeRecognition.abort(); } catch (e) {}
+    activeRecognition = null;
+    STATE.isListening = false;
+    renderApp();
+    return;
+  }
+
+  // Request microphone permission explicitly first
+  try {
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop());
+    }
+  } catch (err) {
+    console.warn('Microphone permission check error:', err);
+    notify('Por favor permite el acceso al micrófono en tu navegador', 'error');
     return;
   }
 
@@ -85,31 +108,57 @@ function startSpeechRecognition(targetWord, lang) {
   STATE.pronunciationResult = null;
   renderApp();
 
-  const recognition = new SpeechRecognition();
-  recognition.lang = LANGS[lang]?.code || 'en-US';
-  recognition.interimResults = false;
-  recognition.maxAlternatives = 1;
+  try {
+    const recognition = new SpeechRecognition();
+    recognition.lang = LANGS[lang]?.code || 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.continuous = false;
+    activeRecognition = recognition;
 
-  recognition.onresult = (event) => {
-    const spoken = event.results[0][0].transcript;
-    STATE.pronunciationResult = evaluatePronunciation(targetWord, spoken);
+    recognition.onresult = (event) => {
+      if (event.results && event.results.length > 0) {
+        const spoken = event.results[0][0].transcript;
+        STATE.pronunciationResult = evaluatePronunciation(targetWord, spoken);
+      }
+      STATE.isListening = false;
+      activeRecognition = null;
+      renderApp();
+    };
+
+    recognition.onerror = (event) => {
+      console.warn('Speech recognition error:', event.error);
+      STATE.isListening = false;
+      activeRecognition = null;
+      if (event.error !== 'aborted' && event.error !== 'no-speech') {
+        notify(`Aviso de micrófono: ${event.error}`, 'error');
+      }
+      renderApp();
+    };
+
+    recognition.onend = () => {
+      STATE.isListening = false;
+      activeRecognition = null;
+      renderApp();
+    };
+
+    // Small delay to let browser finish DOM updates and mic allocation
+    setTimeout(() => {
+      if (activeRecognition === recognition) {
+        try {
+          recognition.start();
+        } catch (e) {
+          console.error('Error starting recognition:', e);
+        }
+      }
+    }, 100);
+  } catch (err) {
+    console.error('Speech initialization error:', err);
     STATE.isListening = false;
+    activeRecognition = null;
+    notify('No se pudo iniciar el micrófono', 'error');
     renderApp();
-  };
-
-  recognition.onerror = (event) => {
-    console.error('Speech recognition error:', event.error);
-    STATE.isListening = false;
-    notify(`Error de micrófono: ${event.error}`, 'error');
-    renderApp();
-  };
-
-  recognition.onend = () => {
-    STATE.isListening = false;
-    renderApp();
-  };
-
-  recognition.start();
+  }
 }
 
 // Notification toast helper
