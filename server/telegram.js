@@ -1,6 +1,14 @@
 import { query, execute, getSetting, setSetting } from './db.js';
 import { calculateNextReview } from './srs.js';
 
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 let pollingActive = false;
 let lastUpdateId = 0;
 
@@ -10,7 +18,7 @@ export async function getBotToken() {
 
 export async function callTelegram(method, payload = {}) {
   const token = await getBotToken();
-  if (!token) return null;
+  if (!token) return { ok: false, description: 'Falta configurar el Token del bot de Telegram' };
 
   try {
     const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
@@ -18,10 +26,14 @@ export async function callTelegram(method, payload = {}) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    return await res.json();
+    const data = await res.json();
+    if (!data.ok) {
+      console.warn(`[Telegram API] Error in ${method}:`, data);
+    }
+    return data;
   } catch (err) {
     console.warn(`[Telegram] Error calling ${method}:`, err.message);
-    return null;
+    return { ok: false, description: err.message };
   }
 }
 
@@ -52,8 +64,8 @@ export async function sendDailyTelegramReminder(appUrl = '') {
     return { success: true, count: 0 };
   }
 
-  const breakdown = rows.map(r => `• *${r.lang.toUpperCase()}*: ${r.count} palabras`).join('\n');
-  const message = `🔔 *¡Hora de repasar tu vocabulario!*\n\nTienes *${totalDue} palabras* listas para hoy:\n${breakdown}\n\n¿Quieres hacer un mini quiz rápido aquí o entrar a la web?`;
+  const breakdown = rows.map(r => `• <b>${r.lang.toUpperCase()}</b>: ${r.count} palabras`).join('\n');
+  const message = `🔔 <b>¡Hora de repasar tu vocabulario!</b>\n\nTienes <b>${totalDue} palabras</b> listas para hoy:\n${breakdown}\n\n¿Quieres hacer un mini quiz rápido aquí o entrar a la web?`;
 
   const inline_keyboard = [
     [{ text: '🎯 Repasar aquí en Telegram', callback_data: 'start_quiz' }]
@@ -62,14 +74,23 @@ export async function sendDailyTelegramReminder(appUrl = '') {
     inline_keyboard.push([{ text: '🌐 Abrir Web App', url: appUrl }]);
   }
 
-  await callTelegram('sendMessage', {
+  const tgRes = await callTelegram('sendMessage', {
     chat_id: chatId,
     text: message,
-    parse_mode: 'Markdown',
+    parse_mode: 'HTML',
     reply_markup: { inline_keyboard }
   });
 
-  return { success: true, count: totalDue };
+  if (!tgRes || !tgRes.ok) {
+    console.error('[Telegram] Error enviando recordatorio:', tgRes);
+    let errorDetail = tgRes?.description || 'No se pudo enviar el mensaje a Telegram';
+    if (errorDetail.includes('chat not found') || errorDetail.includes('Forbidden') || tgRes?.error_code === 403 || tgRes?.error_code === 400) {
+      errorDetail += ' (Asegúrate de haber abierto el bot en Telegram y haber pulsado INICIAR o enviado /start, y que tu Chat ID sea numérico).';
+    }
+    return { success: false, error: errorDetail, tgResponse: tgRes };
+  }
+
+  return { success: true, count: totalDue, messageId: tgRes.result?.message_id };
 }
 
 export async function handleTelegramUpdate(update) {
@@ -133,16 +154,16 @@ async function sendStats(chatId) {
     SELECT lang, COUNT(id) as total FROM words WHERE active = 1 GROUP BY lang
   `);
 
-  let text = '📊 *Estado de tu vocabulario:*\n\n';
+  let text = '📊 <b>Estado de tu vocabulario:</b>\n\n';
   for (const t of totalRows) {
     const due = dueRows.find(d => d.lang === t.lang)?.count || 0;
-    text += `*${t.lang.toUpperCase()}*: ${t.total} palabras (${due} pendientes)\n`;
+    text += `<b>${t.lang.toUpperCase()}</b>: ${t.total} palabras (${due} pendientes)\n`;
   }
 
   await callTelegram('sendMessage', {
     chat_id: chatId,
     text,
-    parse_mode: 'Markdown',
+    parse_mode: 'HTML',
     reply_markup: {
       inline_keyboard: [[{ text: '📚 Repasar', callback_data: 'quiz_next' }]]
     }
@@ -181,15 +202,15 @@ async function sendQuizCard(chatId) {
   }
 
   const word = cards[0];
-  let text = `🌍 *[${word.lang.toUpperCase()}]*  \`${word.word}\`\n`;
-  if (word.transcription) text += `🗣️ /${word.transcription}/\n`;
-  if (word.tags) text += `🏷️ _${word.tags}_\n`;
+  let text = `🌍 <b>[${word.lang.toUpperCase()}]</b>  <code>${escapeHtml(word.word)}</code>\n`;
+  if (word.transcription) text += `🗣️ /${escapeHtml(word.transcription)}/\n`;
+  if (word.tags) text += `🏷️ <i>${escapeHtml(word.tags)}</i>\n`;
   text += '\n🤔 ¿Recuerdas qué significa?';
 
   await callTelegram('sendMessage', {
     chat_id: chatId,
     text,
-    parse_mode: 'Markdown',
+    parse_mode: 'HTML',
     reply_markup: {
       inline_keyboard: [
         [{ text: '👁️ Revelar significado', callback_data: `reveal:${word.id}` }]
@@ -212,16 +233,16 @@ async function revealQuizCard(chatId, messageId, wordId) {
   let examples = [];
   try { examples = JSON.parse(word.examples || '[]'); } catch (e) {}
 
-  let text = `🌍 *[${word.lang.toUpperCase()}]*  \`${word.word}\`\n`;
-  if (word.transcription) text += `🗣️ /${word.transcription}/\n`;
-  text += `\n📖 *Significado:*\n👉 ${word.translation}\n`;
+  let text = `🌍 <b>[${word.lang.toUpperCase()}]</b>  <code>${escapeHtml(word.word)}</code>\n`;
+  if (word.transcription) text += `🗣️ /${escapeHtml(word.transcription)}/\n`;
+  text += `\n📖 <b>Significado:</b>\n👉 ${escapeHtml(word.translation)}\n`;
 
   if (word.additional_translation) {
-    text += `➕ _${word.additional_translation}_\n`;
+    text += `➕ <i>${escapeHtml(word.additional_translation)}</i>\n`;
   }
 
   if (examples.length > 0) {
-    text += `\n💬 *Ejemplo:*\n"${examples[0].source}"\n↳ _${examples[0].translation}_\n`;
+    text += `\n💬 <b>Ejemplo:</b>\n"${escapeHtml(examples[0].source)}"\n↳ <i>${escapeHtml(examples[0].translation || '')}</i>\n`;
   }
 
   text += '\n¿Cómo te resultó recordarla?';
@@ -230,7 +251,7 @@ async function revealQuizCard(chatId, messageId, wordId) {
     chat_id: chatId,
     message_id: messageId,
     text,
-    parse_mode: 'Markdown',
+    parse_mode: 'HTML',
     reply_markup: {
       inline_keyboard: [
         [
@@ -272,8 +293,8 @@ async function submitQuizRating(chatId, messageId, wordId, rating) {
   await callTelegram('editMessageText', {
     chat_id: chatId,
     message_id: messageId,
-    text: `✅ Calificación: *${ratingText}*.\nPróximo repaso programado: *${nextIntervalDesc}*.`,
-    parse_mode: 'Markdown',
+    text: `✅ Calificación: <b>${ratingText}</b>.\nPróximo repaso programado: <b>${nextIntervalDesc}</b>.`,
+    parse_mode: 'HTML',
     reply_markup: {
       inline_keyboard: [
         [{ text: '➡️ Siguiente palabra', callback_data: 'quiz_next' }]

@@ -11,7 +11,7 @@ import { lookupWord } from './wiktionary.js';
 import { getWordImage, searchImageCandidates, setWordImage, clearImageCache } from './images.js';
 import { checkAndSyncDrive, setupDriveWatch, getServiceAccountEmail } from './drive.js';
 import { syncDailyCalendarEvent } from './calendar.js';
-import { sendDailyTelegramReminder, handleTelegramUpdate, startTelegramPolling } from './telegram.js';
+import { sendDailyTelegramReminder, handleTelegramUpdate, startTelegramPolling, getBotToken } from './telegram.js';
 import { startScheduler } from './scheduler.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -533,7 +533,8 @@ async function start() {
   }
 
   // Start Telegram bot polling if token exists
-  if (process.env.TELEGRAM_BOT_TOKEN) {
+  const tgToken = await getBotToken();
+  if (tgToken) {
     startTelegramPolling();
   }
 
