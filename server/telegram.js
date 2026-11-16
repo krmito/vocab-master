@@ -4,12 +4,12 @@ import { calculateNextReview } from './srs.js';
 let pollingActive = false;
 let lastUpdateId = 0;
 
-function getBotToken() {
-  return process.env.TELEGRAM_BOT_TOKEN;
+export async function getBotToken() {
+  return process.env.TELEGRAM_BOT_TOKEN || (await getSetting('telegram_bot_token'));
 }
 
 export async function callTelegram(method, payload = {}) {
-  const token = getBotToken();
+  const token = await getBotToken();
   if (!token) return null;
 
   try {
@@ -26,11 +26,11 @@ export async function callTelegram(method, payload = {}) {
 }
 
 export async function sendDailyTelegramReminder(appUrl = '') {
-  const token = getBotToken();
+  const token = await getBotToken();
   const chatId = process.env.TELEGRAM_CHAT_ID || (await getSetting('telegram_chat_id'));
 
   if (!token || !chatId) {
-    return { success: false, reason: 'Falta TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID' };
+    return { success: false, reason: 'Falta TELEGRAM_BOT_TOKEN o TELEGRAM_CHAT_ID (puedes configurarlo en la pestaña Ajustes o en Variables de Railway)' };
   }
 
   const nowIso = new Date().toISOString();
@@ -283,8 +283,8 @@ async function submitQuizRating(chatId, messageId, wordId, rating) {
 }
 
 // Polling worker for local or direct use without webhook
-export function startTelegramPolling() {
-  const token = getBotToken();
+export async function startTelegramPolling() {
+  const token = await getBotToken();
   if (!token || pollingActive) return;
 
   pollingActive = true;

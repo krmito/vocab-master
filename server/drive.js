@@ -19,7 +19,11 @@ export function getDriveAuth() {
     if (credentials) {
       return new google.auth.GoogleAuth({
         credentials,
-        scopes: ['https://www.googleapis.com/auth/drive.readonly']
+        scopes: [
+          'https://www.googleapis.com/auth/drive.readonly',
+          'https://www.googleapis.com/auth/calendar',
+          'https://www.googleapis.com/auth/calendar.events'
+        ]
       });
     }
   }
@@ -35,6 +39,22 @@ export function getDriveAuth() {
   }
 
   return null;
+}
+
+export function getServiceAccountEmail() {
+  const serviceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!serviceAccountKey) return null;
+  try {
+    let credentials;
+    if (serviceAccountKey.startsWith('{')) {
+      credentials = JSON.parse(serviceAccountKey);
+    } else if (fs.existsSync(serviceAccountKey)) {
+      credentials = JSON.parse(fs.readFileSync(serviceAccountKey, 'utf-8'));
+    }
+    return credentials?.client_email || null;
+  } catch (e) {
+    return null;
+  }
 }
 
 export function getDriveInstance() {

@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { getDriveAuth } from './drive.js';
+import { getDriveAuth, getServiceAccountEmail } from './drive.js';
 import { query, getSetting } from './db.js';
 
 let calendarClient = null;
@@ -108,6 +108,11 @@ export async function syncDailyCalendarEvent(appUrl = '') {
     return { success: true, event: resultEvent };
   } catch (err) {
     console.error('[Calendar] Error al gestionar evento en Google Calendar:', err.message);
-    return { success: false, error: err.message };
+    const saEmail = getServiceAccountEmail();
+    let detail = err.message;
+    if (err.message.includes('Insufficient Permission') || err.message.includes('Not Found') || err.code === 404 || err.code === 403) {
+      detail += ` | Solución: Si usas cuenta de servicio (${saEmail || 'tu-cuenta-de-servicio'}), debes compartir tu calendario de Google con ella dándole permiso de "Hacer cambios en eventos", y configurar tu correo en Calendar ID en Ajustes.`;
+    }
+    return { success: false, error: detail };
   }
 }

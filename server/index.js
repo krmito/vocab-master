@@ -9,7 +9,7 @@ import { importExcelFromFile, importExcelFromBuffer } from './excel.js';
 import { calculateNextReview } from './srs.js';
 import { lookupWord } from './wiktionary.js';
 import { getWordImage, searchImageCandidates, setWordImage, clearImageCache } from './images.js';
-import { checkAndSyncDrive, setupDriveWatch } from './drive.js';
+import { checkAndSyncDrive, setupDriveWatch, getServiceAccountEmail } from './drive.js';
 import { syncDailyCalendarEvent } from './calendar.js';
 import { sendDailyTelegramReminder, handleTelegramUpdate, startTelegramPolling } from './telegram.js';
 import { startScheduler } from './scheduler.js';
@@ -457,17 +457,21 @@ app.get('/api/settings', async (req, res) => {
     const reminderHour = await getSetting('reminder_hour', '9');
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID || (await getSetting('drive_folder_id', ''));
     const calendarId = process.env.GOOGLE_CALENDAR_ID || (await getSetting('calendar_id', ''));
+    const tgBotToken = process.env.TELEGRAM_BOT_TOKEN ? '********' : (await getSetting('telegram_bot_token', ''));
     const tgChatId = process.env.TELEGRAM_CHAT_ID || (await getSetting('telegram_chat_id', ''));
     const hasServiceAccount = Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_KEY);
-    const hasTelegram = Boolean(process.env.TELEGRAM_BOT_TOKEN);
+    const serviceAccountEmail = getServiceAccountEmail();
+    const hasTelegram = Boolean(process.env.TELEGRAM_BOT_TOKEN || (await getSetting('telegram_bot_token')));
 
     res.json({
       success: true,
       reminderHour,
       folderId,
       calendarId,
+      tgBotToken: tgBotToken ? (tgBotToken.length > 8 ? tgBotToken.slice(0, 4) + '...' + tgBotToken.slice(-4) : '******') : '',
       tgChatId,
       hasServiceAccount,
+      serviceAccountEmail,
       hasTelegram,
       appUrl: getAppPublicUrl()
     });
@@ -478,11 +482,16 @@ app.get('/api/settings', async (req, res) => {
 
 app.post('/api/settings', async (req, res) => {
   try {
-    const { reminderHour, folderId, calendarId, tgChatId } = req.body;
+    const { reminderHour, folderId, calendarId, tgBotToken, tgChatId } = req.body;
     if (reminderHour !== undefined) await setSetting('reminder_hour', reminderHour);
     if (folderId !== undefined) await setSetting('drive_folder_id', folderId);
     if (calendarId !== undefined) await setSetting('calendar_id', calendarId);
-    if (tgChatId !== undefined) await setSetting('telegram_chat_id', tgChatId);
+    if (tgBotToken !== undefined && tgBotToken.trim() !== '' && !tgBotToken.includes('...')) {
+      await setSetting('telegram_bot_token', tgBotToken.trim());
+      // Start telegram polling if not already running
+      startTelegramPolling();
+    }
+    if (tgChatId !== undefined) await setSetting('telegram_chat_id', tgChatId.trim());
 
     res.json({ success: true, message: 'Configuraciones guardadas' });
   } catch (err) {

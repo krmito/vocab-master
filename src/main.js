@@ -1538,38 +1538,102 @@ function renderSettings() {
       </div>
 
       <!-- Google Calendar & Telegram Reminders -->
-      <div class="glass" style="padding:24px;display:flex;flex-direction:column;gap:16px;">
+      <div class="glass" style="padding:24px;display:flex;flex-direction:column;gap:18px;">
         <div style="display:flex;align-items:center;gap:12px;">
           <div style="font-size:1.8rem;">📅 💬</div>
           <div>
             <h2 style="font-size:1.2rem;font-weight:700;">Recordatorios (Google Calendar & Telegram)</h2>
             <p style="font-size:0.85rem;color:var(--text-muted);">
-              Crea un evento en tu Google Calendar y te avisa por Telegram con un mini quiz diario.
+              Crea un evento en tu Google Calendar y te avisa por Telegram con un mini quiz interactivo diario.
             </p>
           </div>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <!-- Google Calendar Configuration -->
+        <div style="background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);padding:16px;border-radius:12px;display:flex;flex-direction:column;gap:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-weight:700;font-size:0.95rem;">📅 Google Calendar</div>
+            <div>${s.hasServiceAccount ? '<span style="color:#34d399;font-size:0.8rem;font-weight:700;">✅ Cuenta conectada</span>' : '<span style="color:#fbbf24;font-size:0.8rem;font-weight:700;">⚠️ Falta cuenta de servicio</span>'}</div>
+          </div>
+
+          ${s.serviceAccountEmail ? `
+            <div style="background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.2);padding:10px 14px;border-radius:8px;font-size:0.8rem;color:#bae6fd;line-height:1.5;">
+              <b>Pasos para que Google Calendar funcione:</b><br>
+              1. En tu Google Calendar, ve a <i>Configuración de tu calendario</i> &rarr; <i>Compartir con personas específicas</i>.<br>
+              2. Añade este correo: <code style="background:rgba(0,0,0,0.5);padding:2px 6px;border-radius:4px;user-select:all;color:#38bdf8;">${s.serviceAccountEmail}</code><br>
+              3. Dale permiso de: <b>"Hacer cambios en eventos"</b>.<br>
+              4. Escribe abajo tu correo de Gmail en el campo ID del Calendario.
+            </div>
+          ` : ''}
+
           <div>
-            <label style="font-size:0.85rem;font-weight:600;display:block;margin-bottom:6px;">Hora del recordatorio diario:</label>
-            <select id="cfgReminderHour" onchange="saveReminderHour(this.value)" style="width:100%;background:#1e293b;border:1px solid var(--border-subtle);color:white;padding:10px;border-radius:10px;cursor:pointer;">
+            <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px;">ID del Calendario (Tu correo Gmail):</label>
+            <input 
+              type="text" 
+              id="cfgCalendarId" 
+              placeholder="tu_correo@gmail.com" 
+              value="${s.calendarId || ''}"
+              class="input"
+              style="width:100%;font-size:0.9rem;"
+            >
+          </div>
+        </div>
+
+        <!-- Telegram Configuration -->
+        <div style="background:rgba(0,0,0,0.25);border:1px solid var(--border-subtle);padding:16px;border-radius:12px;display:flex;flex-direction:column;gap:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-weight:700;font-size:0.95rem;">💬 Telegram Bot</div>
+            <div>${s.hasTelegram ? '<span style="color:#34d399;font-size:0.8rem;font-weight:700;">✅ Bot configurado</span>' : '<span style="color:#fbbf24;font-size:0.8rem;font-weight:700;">⚠️ Falta Bot Token</span>'}</div>
+          </div>
+
+          <div style="font-size:0.8rem;color:var(--text-muted);">
+            Crea tu bot en Telegram con <b>@BotFather</b> y pega el token aquí. Para saber tu Chat ID escribe a <b>@userinfobot</b>.
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div>
+              <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px;">Bot Token (de @BotFather):</label>
+              <input 
+                type="password" 
+                id="cfgTgToken" 
+                placeholder="${s.tgBotToken || 'Pega tu token de Telegram'}" 
+                class="input"
+                style="width:100%;font-size:0.9rem;"
+              >
+            </div>
+            <div>
+              <label style="font-size:0.8rem;color:var(--text-muted);display:block;margin-bottom:4px;">Tu Chat ID (número):</label>
+              <input 
+                type="text" 
+                id="cfgTgChatId" 
+                placeholder="Ej. 123456789" 
+                value="${s.tgChatId || ''}"
+                class="input"
+                style="width:100%;font-size:0.9rem;"
+              >
+            </div>
+          </div>
+        </div>
+
+        <!-- Reminder Hour & Actions -->
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <label style="font-size:0.85rem;font-weight:600;">Hora del recordatorio:</label>
+            <select id="cfgReminderHour" style="background:#1e293b;border:1px solid var(--border-subtle);color:white;padding:8px 12px;border-radius:10px;cursor:pointer;">
               ${Array.from({length: 24}).map((_, i) => `
                 <option value="${i}" ${parseInt(s.reminderHour || 9, 10) === i ? 'selected' : ''}>${String(i).padStart(2, '0')}:00</option>
               `).join('')}
             </select>
           </div>
-          <div>
-            <label style="font-size:0.85rem;font-weight:600;display:block;margin-bottom:6px;">Telegram Bot Status:</label>
-            <div style="padding:10px;background:rgba(0,0,0,0.3);border-radius:10px;font-size:0.85rem;">
-              ${s.hasTelegram ? '<span style="color:#34d399;">✅ Bot activo</span>' : '<span style="color:#fbbf24;">⚠️ Falta TELEGRAM_BOT_TOKEN</span>'}
-            </div>
-          </div>
-        </div>
 
-        <div style="margin-top:10px;">
-          <button class="btn btn-secondary" onclick="testRemindersNow()">
-            🔔 Probar recordatorio ahora (Calendar + Telegram)
-          </button>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary" onclick="saveReminderSettings()">
+              💾 Guardar ajustes
+            </button>
+            <button class="btn btn-secondary" onclick="testRemindersNow()">
+              🔔 Probar ahora
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1683,15 +1747,44 @@ async function saveReminderHour(val) {
   await loadSettings();
 }
 
+async function saveReminderSettings() {
+  const calendarId = document.getElementById('cfgCalendarId')?.value?.trim();
+  const tgToken = document.getElementById('cfgTgToken')?.value?.trim();
+  const tgChatId = document.getElementById('cfgTgChatId')?.value?.trim();
+  const reminderHour = document.getElementById('cfgReminderHour')?.value;
+
+  const payload = { reminderHour };
+  if (calendarId !== undefined) payload.calendarId = calendarId;
+  if (tgToken) payload.tgBotToken = tgToken;
+  if (tgChatId !== undefined) payload.tgChatId = tgChatId;
+
+  await apiPost('/api/settings', payload);
+  notify('Ajustes de recordatorios guardados', 'success');
+  await loadSettings();
+  renderApp();
+}
+
 async function testRemindersNow() {
-  notify('Disparando prueba de recordatorios...', 'info');
+  notify('Ejecutando prueba de recordatorios...', 'info');
   try {
     const res = await apiPost('/api/remind/now');
-    if (res.success) {
-      notify('¡Prueba completada! Revisa tu Google Calendar y Telegram.', 'success');
+    
+    // Calendar check
+    if (res.calendar?.success) {
+      notify('✅ Google Calendar: ¡Evento creado o actualizado!', 'success');
     } else {
-      notify(res.error || 'No se pudo completar la prueba', 'error');
+      notify(`⚠️ Calendar: ${res.calendar?.error || res.calendar?.reason || 'Error'}`, 'error');
     }
+
+    // Telegram check
+    setTimeout(() => {
+      if (res.telegram?.success) {
+        notify('✅ Telegram: ¡Mensaje y quiz enviado con éxito!', 'success');
+      } else {
+        notify(`⚠️ Telegram: ${res.telegram?.reason || res.telegram?.error || 'No configurado'}`, 'error');
+      }
+    }, 1800);
+
   } catch (err) {
     notify('Error al probar recordatorios', 'error');
   }
@@ -1725,6 +1818,7 @@ window.syncDriveNow = syncDriveNow;
 window.uploadExcelFile = uploadExcelFile;
 window.saveDriveFolder = saveDriveFolder;
 window.saveReminderHour = saveReminderHour;
+window.saveReminderSettings = saveReminderSettings;
 window.testRemindersNow = testRemindersNow;
 
 // Boot
