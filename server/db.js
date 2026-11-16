@@ -22,22 +22,14 @@ export async function initDb() {
     isPostgres = true;
     await setupPostgresTables(pool);
   } else {
-    console.log('[DB] Inicializando SQLite local...');
+    console.log('[DB] Usando SQLite local (node:sqlite)...');
+    const { DatabaseSync } = await import('node:sqlite');
     const dbDir = path.join(__dirname, '..', 'data');
     if (!fs.existsSync(dbDir)) {
       fs.mkdirSync(dbDir, { recursive: true });
     }
     const dbPath = path.join(dbDir, 'vocab.sqlite');
-
-    let sqlite;
-    try {
-      const { DatabaseSync } = await import('node:sqlite');
-      sqlite = new DatabaseSync(dbPath);
-    } catch {
-      const BetterSqlite = (await import('better-sqlite3')).default;
-      sqlite = new BetterSqlite(dbPath);
-    }
-
+    const sqlite = new DatabaseSync(dbPath);
     sqlite.exec('PRAGMA journal_mode = WAL;');
     dbClient = sqlite;
     isPostgres = false;
