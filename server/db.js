@@ -121,6 +121,14 @@ function setupSqliteTables(sqlite) {
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS synonyms_cache (
+      lang TEXT NOT NULL,
+      word TEXT NOT NULL,
+      synonyms_json TEXT NOT NULL,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (lang, word)
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT
@@ -184,6 +192,14 @@ async function setupPostgresTables(pool) {
       word VARCHAR(255) PRIMARY KEY,
       image_url TEXT NOT NULL,
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS synonyms_cache (
+      lang VARCHAR(10) NOT NULL,
+      word VARCHAR(255) NOT NULL,
+      synonyms_json TEXT NOT NULL,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT uq_syn_lang_word PRIMARY KEY (lang, word)
     );
 
     CREATE TABLE IF NOT EXISTS settings (

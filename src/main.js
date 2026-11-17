@@ -37,6 +37,8 @@ const STATE = {
   imagePickerLang: 'en',
   imagePickerSearchQuery: '',
   modalImage: null,
+  lightbox: null,
+  revealedSynonymHint: false,
   settings: null,
   notification: null
 };
@@ -253,6 +255,163 @@ function renderConjugationSection(wikiData, currentWord, lang) {
   `;
 }
 
+function renderSynonymsSection(wikiData, word, lang, wordId) {
+  if (STATE.wikiLoading) {
+    return `
+      <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.2);border-radius:14px;padding:14px;">
+        <div style="font-size:0.8rem;color:#34d399;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;display:flex;align-items:center;gap:6px;">
+          🌿 Sinónimos y Relacionados ⏳
+        </div>
+        <div style="font-size:0.85rem;color:var(--text-muted);margin-top:6px;">Buscando sinónimos en línea...</div>
+      </div>
+    `;
+  }
+
+  if (wikiData && wikiData.synonyms && wikiData.synonyms.length > 0) {
+    return `
+      <div style="background:rgba(16,185,129,0.07);border:1px solid rgba(16,185,129,0.22);border-radius:14px;padding:15px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <div style="font-size:0.8rem;color:#34d399;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;display:flex;align-items:center;gap:6px;">
+            🌿 Sinónimos (${wikiData.synonyms.length})
+          </div>
+          ${wordId ? `
+            <button onclick="refreshWordSynonyms(${wordId})" class="btn btn-outline" style="padding:2px 8px;font-size:0.75rem;color:var(--text-muted);" title="Buscar sinónimos frescos">
+              🔄 Actualizar
+            </button>
+          ` : ''}
+        </div>
+        <div class="synonyms-group">
+          ${wikiData.synonyms.map(syn => `
+            <button class="synonym-pill" onclick="speak('${syn.replace(/'/g, "\\'")}', '${lang}')" title="🔊 Clic para escuchar pronunciación de '${syn}'">
+              ${syn} <small>🔊</small>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  if (wikiData) {
+    return `
+      <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:12px;padding:12px 14px;display:flex;align-items:center;justify-content:space-between;">
+        <div style="font-size:0.85rem;color:var(--text-dim);">
+          🌿 Sinónimos: <span style="color:var(--text-muted);">Sin sinónimos registrados para "${word}".</span>
+        </div>
+        ${wordId ? `
+          <button onclick="refreshWordSynonyms(${wordId})" class="btn btn-outline" style="padding:2px 8px;font-size:0.75rem;color:var(--text-muted);">
+            🔍 Buscar
+          </button>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  return '';
+}
+
+function openImageLightbox(url, word = '', translation = '', lang = '', wordId = null) {
+  if (!url) return;
+  STATE.lightbox = {
+    url,
+    word,
+    translation,
+    lang,
+    wordId,
+    isZoomed: false
+  };
+  renderApp();
+}
+
+function closeImageLightbox() {
+  STATE.lightbox = null;
+  renderApp();
+}
+
+function toggleLightboxZoom(e) {
+  if (e) e.stopPropagation();
+  if (STATE.lightbox) {
+    STATE.lightbox.isZoomed = !STATE.lightbox.isZoomed;
+    renderApp();
+  }
+}
+
+function renderLightboxModal() {
+  const lb = STATE.lightbox;
+  if (!lb) return '';
+
+  return `
+    <div class="lightbox-overlay" onclick="closeImageLightbox()">
+      <div class="lightbox-modal" onclick="event.stopPropagation()">
+        <!-- Close button top-right -->
+        <div style="width:100%;display:flex;justify-content:flex-end;margin-bottom:10px;">
+          <button onclick="closeImageLightbox()" class="btn btn-outline" style="border-radius:999px;padding:6px 14px;background:rgba(0,0,0,0.6);border:1px solid rgba(255,255,255,0.2);color:white;font-size:0.9rem;" title="Cerrar (Esc)">
+            ✕ Cerrar
+          </button>
+        </div>
+
+        <!-- Image with click to zoom -->
+        <div class="lightbox-img-wrapper" title="Haz clic para alternar zoom (1.5x)">
+          <img 
+            src="${lb.url}" 
+            alt="${lb.word || 'Imagen'}" 
+            class="lightbox-img ${lb.isZoomed ? 'zoomed' : ''}"
+            onclick="toggleLightboxZoom(event)"
+          >
+        </div>
+
+        <!-- Bottom bar info & actions -->
+        <div class="lightbox-bar">
+          ${lb.word ? `
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              ${lb.lang ? `<span class="lang-badge ${lb.lang}">${lb.lang}</span>` : ''}
+              <b style="font-size:1.15rem;letter-spacing:-0.01em;">${lb.word}</b>
+              ${lb.translation ? `<span style="color:#94a3b8;font-size:0.95rem;">↳ ${lb.translation}</span>` : ''}
+              ${lb.lang ? `<button onclick="speak('${lb.word.replace(/'/g, "\\'")}', '${lb.lang}')" style="background:none;border:none;cursor:pointer;color:#818cf8;font-size:1.1rem;padding:0 4px;" title="Escuchar voz">🔊</button>` : ''}
+            </div>
+          ` : ''}
+
+          <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
+            <button onclick="toggleLightboxZoom(event)" class="btn btn-secondary" style="padding:5px 12px;font-size:0.8rem;border-radius:20px;">
+              ${lb.isZoomed ? '🔍- Reducir' : '🔍+ Agrandar'}
+            </button>
+            ${lb.wordId ? `
+              <button onclick="closeImageLightbox(); openImagePicker(${lb.wordId}, '${lb.word.replace(/'/g, "\\'")}', '${(lb.translation||'').replace(/'/g, "\\'")}', '${lb.lang}')" class="btn btn-secondary" style="padding:5px 12px;font-size:0.8rem;border-radius:20px;" title="Buscar otra foto">
+                🔄 Cambiar
+              </button>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function refreshWordSynonyms(wordId) {
+  notify('Buscando sinónimos actualizados...', 'info');
+  try {
+    const res = await apiPost(`/api/words/${wordId}/synonyms/refresh`);
+    if (res && res.success && res.synonyms) {
+      if (!STATE.wikiData) STATE.wikiData = {};
+      STATE.wikiData.synonyms = res.synonyms;
+      notify(`Se encontraron ${res.synonyms.length} sinónimos`, 'success');
+      renderApp();
+    } else {
+      notify('No se encontraron sinónimos adicionales', 'info');
+    }
+  } catch (err) {
+    notify('Error al actualizar sinónimos', 'error');
+  }
+}
+
+async function toggleSynonymHint() {
+  STATE.revealedSynonymHint = true;
+  const card = STATE.studyCards[STATE.currentCardIndex];
+  if (card && !STATE.wikiData && !STATE.wikiLoading) {
+    await loadWiktionary(card.id);
+  }
+  renderApp();
+}
+
 // Notification toast helper
 function notify(msg, type = 'info') {
   STATE.notification = { msg, type };
@@ -415,6 +574,9 @@ function renderApp() {
 
     <!-- Image Picker Modal -->
     ${STATE.imagePickerOpen ? renderImagePickerModal() : ''}
+
+    <!-- Image Lightbox Modal -->
+    ${STATE.lightbox ? renderLightboxModal() : ''}
   `;
 }
 
@@ -889,16 +1051,16 @@ function renderStudy() {
                     Buscando imagen... ⏳
                   </div>
                 ` : STATE.cardImage ? `
-                  <div style="position:relative;overflow:hidden;border-radius:16px;border:1px solid var(--border-subtle);box-shadow:0 12px 30px rgba(0,0,0,0.5);max-height:200px;background:#000;">
+                  <div class="word-image-card" onclick="openImageLightbox('${STATE.cardImage}', '${card.word.replace(/'/g, "\\'")}', '${(card.translation||'').replace(/'/g, "\\'")}', '${card.lang}', ${card.id})" title="🔍 Clic para agrandar imagen">
+                    <img src="${STATE.cardImage}" alt="" class="image-blur-bg" aria-hidden="true">
                     <img 
                       src="${STATE.cardImage}" 
                       alt="${card.word}" 
-                      style="width:100%;height:180px;object-fit:cover;display:block;transition:transform 0.3s;"
-                      onmouseover="this.style.transform='scale(1.02)'"
-                      onmouseout="this.style.transform='scale(1)'"
-                      onerror="this.parentElement.style.display='none'"
+                      class="image-foreground"
+                      onerror="this.closest('.word-image-card').style.display='none'"
                     >
-                    <div style="position:absolute;bottom:8px;right:8px;display:flex;gap:6px;">
+                    <div class="zoom-hint-badge">🔍 Agrandar</div>
+                    <div style="position:absolute;bottom:8px;right:8px;display:flex;gap:6px;z-index:6;" onclick="event.stopPropagation()">
                       <button onclick="openImagePicker(${card.id}, '${card.word.replace(/'/g, "\\'")}', '${(card.translation||'').replace(/'/g, "\\'")}', '${card.lang}')" class="btn btn-secondary" style="padding:4px 9px;font-size:0.75rem;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,0.25);color:white;" title="Cambiar imagen">
                         🔄 Cambiar
                       </button>
@@ -945,6 +1107,22 @@ function renderStudy() {
               </a>
             </div>
 
+            <!-- Optional Synonym Hint (Front of Card) -->
+            ${!STATE.cardRevealed ? `
+              <div style="margin-top:14px;display:flex;justify-content:center;">
+                ${STATE.revealedSynonymHint && STATE.wikiData?.synonyms?.length ? `
+                  <div class="animate-fade-in" style="background:rgba(16,185,129,0.1);border:1px dashed rgba(16,185,129,0.35);padding:6px 16px;border-radius:999px;font-size:0.88rem;color:#6ee7b7;display:inline-flex;align-items:center;gap:8px;">
+                    💡 Pista: <b>${STATE.wikiData.synonyms[0]}</b>
+                    <button onclick="speak('${STATE.wikiData.synonyms[0].replace(/'/g, "\\'")}', '${card.lang}')" style="background:none;border:none;cursor:pointer;color:#34d399;font-size:0.85rem;" title="Escuchar voz">🔊</button>
+                  </div>
+                ` : `
+                  <button onclick="toggleSynonymHint()" class="btn btn-outline" style="font-size:0.8rem;padding:4px 12px;border-radius:20px;color:var(--text-dim);border:1px dashed var(--border-subtle);" title="Muestra 1 sinónimo como pista sin revelar la traducción">
+                    💡 Ver pista (sinónimo)
+                  </button>
+                `}
+              </div>
+            ` : ''}
+
             <!-- Pronunciation Feedback Result -->
             ${STATE.pronunciationResult ? `
               <div class="animate-fade-in" style="margin-top:18px;padding:14px 20px;border-radius:14px;background:rgba(255,255,255,0.04);border:1px solid ${STATE.pronunciationResult.color};display:inline-flex;flex-direction:column;align-items:center;gap:6px;">
@@ -980,6 +1158,9 @@ function renderStudy() {
                   </div>
                 ` : ''}
               </div>
+
+              <!-- Synonyms Section -->
+              ${renderSynonymsSection(STATE.wikiData, card.word, card.lang, card.id)}
 
               <!-- Examples Section -->
               ${card.examples && card.examples.length > 0 ? `
@@ -1283,7 +1464,7 @@ function renderImagePickerModal() {
                     onmouseout="this.style.borderColor='rgba(255,255,255,0.08)';this.style.transform='scale(1)'"
                     title="${c.title || 'Seleccionar'}"
                   >
-                    <img src="${c.thumbnail || c.image}" alt="${c.title}" style="width:100%;height:100px;object-fit:cover;display:block;" onerror="this.src='https://via.placeholder.com/150?text=Error'">
+                    <img src="${c.thumbnail || c.image}" alt="${c.title}" style="width:100%;height:110px;object-fit:contain;background:#060a12;display:block;" onerror="this.src='https://via.placeholder.com/150?text=Error'">
                     <div style="padding:6px;font-size:0.7rem;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
                       ${c.title}
                     </div>
@@ -1336,6 +1517,7 @@ async function submitRating(wordId, rating) {
     STATE.isListening = false;
     STATE.showConjugations = false;
     STATE.cardImage = null;
+    STATE.revealedSynonymHint = false;
     loadStats();
     renderApp();
 
@@ -1350,6 +1532,22 @@ async function submitRating(wordId, rating) {
 
 function setupKeyboardShortcuts() {
   window.addEventListener('keydown', (e) => {
+    // Escape closes modals/lightboxes regardless of active tab
+    if (e.key === 'Escape') {
+      if (STATE.lightbox) {
+        closeImageLightbox();
+        return;
+      }
+      if (STATE.imagePickerOpen) {
+        closeImagePicker();
+        return;
+      }
+      if (STATE.selectedWord) {
+        closeWordModal();
+        return;
+      }
+    }
+
     if (STATE.currentTab !== 'study') return;
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
@@ -1671,9 +1869,11 @@ function renderWordModal() {
         </div>
 
         ${STATE.modalImage ? `
-          <div style="position:relative;margin-bottom:16px;max-height:220px;overflow:hidden;border-radius:14px;border:1px solid var(--border-subtle);box-shadow:0 10px 25px rgba(0,0,0,0.4);background:#000;">
-            <img src="${STATE.modalImage}" alt="${w.word}" style="width:100%;height:200px;object-fit:cover;display:block;" onerror="this.parentElement.style.display='none'">
-            <div style="position:absolute;bottom:8px;right:8px;display:flex;gap:6px;">
+          <div class="word-image-card" style="margin-bottom:16px;" onclick="openImageLightbox('${STATE.modalImage}', '${w.word.replace(/'/g, "\\'")}', '${(w.translation||'').replace(/'/g, "\\'")}', '${w.lang}', ${w.id})" title="🔍 Clic para agrandar imagen">
+            <img src="${STATE.modalImage}" alt="" class="image-blur-bg" aria-hidden="true">
+            <img src="${STATE.modalImage}" alt="${w.word}" class="image-foreground" onerror="this.closest('.word-image-card').style.display='none'">
+            <div class="zoom-hint-badge">🔍 Agrandar</div>
+            <div style="position:absolute;bottom:8px;right:8px;display:flex;gap:6px;z-index:6;" onclick="event.stopPropagation()">
               <button onclick="openImagePicker(${w.id}, '${w.word.replace(/'/g, "\\'")}', '${(w.translation||'').replace(/'/g, "\\'")}', '${w.lang}')" class="btn btn-secondary" style="padding:4px 9px;font-size:0.75rem;background:rgba(0,0,0,0.75);backdrop-filter:blur(4px);border:1px solid rgba(255,255,255,0.25);color:white;" title="Cambiar imagen">
                 🔄 Cambiar
               </button>
@@ -1706,10 +1906,15 @@ function renderWordModal() {
         </div>
 
         <!-- Translation -->
-        <div style="margin-bottom:20px;">
+        <div style="margin-bottom:16px;">
           <div style="font-size:0.8rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;">Traducción</div>
           <div style="font-size:1.3rem;font-weight:700;color:#34d399;margin-top:2px;">${w.translation}</div>
           ${w.additional_translation ? `<div style="color:var(--text-muted);font-size:0.95rem;margin-top:4px;">➕ ${w.additional_translation}</div>` : ''}
+        </div>
+
+        <!-- Synonyms in Modal -->
+        <div style="margin-bottom:20px;">
+          ${renderSynonymsSection(STATE.wikiData, w.word, w.lang, w.id)}
         </div>
 
         <!-- Wiktionary Root Lemma Analysis -->
@@ -2302,6 +2507,11 @@ window.saveDriveFolder = saveDriveFolder;
 window.saveReminderHour = saveReminderHour;
 window.saveReminderSettings = saveReminderSettings;
 window.toggleReminderDateInputs = toggleReminderDateInputs;
+window.openImageLightbox = openImageLightbox;
+window.closeImageLightbox = closeImageLightbox;
+window.toggleLightboxZoom = toggleLightboxZoom;
+window.refreshWordSynonyms = refreshWordSynonyms;
+window.toggleSynonymHint = toggleSynonymHint;
 window.autoDetectTelegramChatId = autoDetectTelegramChatId;
 window.testRemindersNow = testRemindersNow;
 

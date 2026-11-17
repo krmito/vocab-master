@@ -13,6 +13,7 @@ import { initDb, query, execute, getSetting, setSetting, getDbInfo } from './db.
 import { importExcelFromFile, importExcelFromBuffer } from './excel.js';
 import { calculateNextReview } from './srs.js';
 import { lookupWord } from './wiktionary.js';
+import { getSynonyms, cleanWordForLookup } from './synonyms.js';
 import { getWordImage, searchImageCandidates, setWordImage, clearImageCache } from './images.js';
 import { checkAndSyncDrive, setupDriveWatch, getServiceAccountEmail, sanitizeDriveFolderId } from './drive.js';
 import { syncDailyCalendarEvent, getCalendarId } from './calendar.js';
@@ -372,6 +373,57 @@ app.get('/api/words/:id/wiktionary', async (req, res) => {
     res.json({
       success: true,
       data: wikiData
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5a. Word Synonyms
+app.get('/api/words/:id/synonyms', async (req, res) => {
+  try {
+    const wordId = req.params.id;
+    const words = await query('SELECT lang, word FROM words WHERE id = ?', [wordId]);
+    if (!words || words.length === 0) {
+      return res.status(404).json({ success: false, error: 'Palabra no encontrada' });
+    }
+
+    const { lang, word } = words[0];
+    const synonyms = await getSynonyms(lang, word);
+
+    res.json({
+      success: true,
+      word,
+      lang,
+      synonyms
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/words/:id/synonyms/refresh', async (req, res) => {
+  try {
+    const wordId = req.params.id;
+    const words = await query('SELECT lang, word FROM words WHERE id = ?', [wordId]);
+    if (!words || words.length === 0) {
+      return res.status(404).json({ success: false, error: 'Palabra no encontrada' });
+    }
+
+    const { lang, word } = words[0];
+    const cleanWord = cleanWordForLookup(lang, word);
+    // Delete from cache so it fetches fresh
+    try {
+      await execute('DELETE FROM synonyms_cache WHERE lang = ? AND word = ?', [lang, cleanWord]);
+    } catch (e) {}
+
+    const synonyms = await getSynonyms(lang, word);
+
+    res.json({
+      success: true,
+      word,
+      lang,
+      synonyms
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

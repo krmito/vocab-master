@@ -1,5 +1,6 @@
 import { query, execute } from './db.js';
 import { getVerbConjugations } from './conjugator.js';
+import { getSynonyms } from './synonyms.js';
 
 const LANG_MAP = {
   en: 'English',
@@ -26,6 +27,10 @@ export async function lookupWord(lang, word) {
       if (!data.conjugation) {
         data.conjugation = getVerbConjugations(cleanLang, cleanWord, data.lemma || cleanWord);
       }
+      // Ensure synonyms are attached even if cache was from older version
+      if (!data.synonyms || !Array.isArray(data.synonyms)) {
+        data.synonyms = await getSynonyms(cleanLang, cleanWord, data.lemma || cleanWord);
+      }
       return data;
     }
   } catch (err) {
@@ -46,6 +51,7 @@ export async function lookupWord(lang, word) {
     if (!res.ok) {
       const fallback = { found: false, word: cleanWord, lang: cleanLang };
       fallback.conjugation = getVerbConjugations(cleanLang, cleanWord, cleanWord);
+      fallback.synonyms = await getSynonyms(cleanLang, cleanWord, cleanWord);
       return fallback;
     }
 
@@ -55,11 +61,13 @@ export async function lookupWord(lang, word) {
     if (!wikitext) {
       const fallback = { found: false, word: cleanWord, lang: cleanLang };
       fallback.conjugation = getVerbConjugations(cleanLang, cleanWord, cleanWord);
+      fallback.synonyms = await getSynonyms(cleanLang, cleanWord, cleanWord);
       return fallback;
     }
 
     const parsed = parseWikitext(wikitext, targetLangHeader, cleanWord);
     parsed.conjugation = getVerbConjugations(cleanLang, cleanWord, parsed.lemma || cleanWord);
+    parsed.synonyms = await getSynonyms(cleanLang, cleanWord, parsed.lemma || cleanWord);
 
     // Save to cache
     try {
@@ -82,6 +90,7 @@ export async function lookupWord(lang, word) {
       error: err.message
     };
     fallback.conjugation = getVerbConjugations(cleanLang, cleanWord, cleanWord);
+    fallback.synonyms = await getSynonyms(cleanLang, cleanWord, cleanWord);
     return fallback;
   }
 }
