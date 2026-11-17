@@ -445,7 +445,52 @@ app.get('/api/words/:id/cloze', async (req, res) => {
   }
 });
 
-// 5a-3. Validate User's Original Sentence (Reto de Producción)
+// LanguageTool grammar checker helper
+const LT_LANG_MAP = {
+  en: 'en-US',
+  fr: 'fr',
+  de: 'de-DE',
+  it: 'it',
+  pt: 'pt-BR',
+  es: 'es'
+};
+
+async function checkGrammarWithLanguageTool(text, lang) {
+  const ltLang = LT_LANG_MAP[lang] || 'auto';
+  const params = new URLSearchParams({ text, language: ltLang });
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch('https://api.languagetool.org/v2/check', {
+        method: 'POST',
+        body: params,
+        headers: { 'User-Agent': 'VocabStudyApp/1.0 (educational sentence validator)' },
+        signal: AbortSignal.timeout(5000)
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const rawMatches = data.matches || [];
+      const errors = rawMatches.filter(m => {
+        const cat = m.rule?.category?.id;
+        return cat !== 'TYPOGRAPHY' && cat !== 'CASING' && cat !== 'WHITESPACE';
+      }).map(m => ({
+        message: m.message,
+        shortMessage: m.shortMessage || 'Error de concordancia o sintaxis',
+        replacements: (m.replacements || []).slice(0, 3).map(r => r.value)
+      }));
+      return { success: true, errors };
+    } catch (err) {
+      if (attempt === 2) {
+        console.warn('[LanguageTool] Error en servicio de corrección:', err.message);
+      } else {
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+  }
+  return { success: false, errors: [] };
+}
+
+// 5a-3. Validate User's Original Sentence (Reto de Producción con Corrección Gramatical)
 app.post('/api/words/:id/validate-sentence', async (req, res) => {
   try {
     const wordId = req.params.id;
@@ -468,7 +513,7 @@ app.post('/api/words/:id/validate-sentence', async (req, res) => {
       return res.json({
         success: true,
         valid: false,
-        message: 'Tu oración es demasiado corta. Intenta crear una frase con sujeto y contexto (al menos 3 o 4 palabras).'
+        message: 'Tu oración es demasiado corta. Escribe una frase con sujeto y contexto (al menos 3 o 4 palabras).'
       });
     }
 
@@ -480,14 +525,40 @@ app.post('/api/words/:id/validate-sentence', async (req, res) => {
       return res.json({
         success: true,
         valid: false,
-        message: `No detectamos la palabra "${word}" en tu oración. Asegúrate de incluirla.`
+        message: `No detectamos la palabra "${word}" en tu oración. Asegúrate de incluirla en tu frase.`
+      });
+    }
+
+    // Run real grammatical verification with LanguageTool
+    const grammarCheck = await checkGrammarWithLanguageTool(cleanSentence, lang);
+
+    if (!grammarCheck.success) {
+      return res.json({
+        success: true,
+        valid: false,
+        message: 'No pudimos verificar la gramática con el servidor en este momento. Por favor presiona Validar nuevamente.'
+      });
+    }
+
+    if (grammarCheck.errors.length > 0) {
+      const firstErr = grammarCheck.errors[0];
+      let errorMsg = `Error gramatical: ${firstErr.message}`;
+      if (firstErr.replacements && firstErr.replacements.length > 0) {
+        errorMsg += ` (Sugerencia: ${firstErr.replacements.join(' o ')})`;
+      }
+
+      return res.json({
+        success: true,
+        valid: false,
+        message: errorMsg,
+        errors: grammarCheck.errors
       });
     }
 
     res.json({
       success: true,
       valid: true,
-      message: `¡Excelente trabajo! Has usado "${word}" en una oración completa.`,
+      message: `¡Excelente trabajo! Tu frase es gramaticalmente correcta y has usado "${word}" con sentido natural.`,
       sentence: cleanSentence
     });
   } catch (err) {

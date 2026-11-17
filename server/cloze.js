@@ -76,23 +76,23 @@ export async function generateClozeExercise(wordId) {
     if (lang === 'en') {
       fullSentence = `In everyday communication, we often use "${cleanWord}".`;
       maskedSentence = `In everyday communication, we often use "________".`;
-      sentenceTranslation = `En la comunicación cotidiana, a menudo usamos "${cleanWord}".`;
+      sentenceTranslation = `En la comunicación cotidiana, a menudo usamos esta palabra.`;
     } else if (lang === 'fr') {
       fullSentence = `Dans la vie quotidienne, il est important d'utiliser "${cleanWord}".`;
       maskedSentence = `Dans la vie quotidienne, il est important d'utiliser "________".`;
-      sentenceTranslation = `En la vida cotidiana, es importante usar "${cleanWord}".`;
+      sentenceTranslation = `En la vida cotidiana, es importante usar esta palabra.`;
     } else if (lang === 'de') {
       fullSentence = `Im täglichen Leben verwenden wir oft "${cleanWord}".`;
       maskedSentence = `Im täglichen Leben verwenden wir oft "________".`;
-      sentenceTranslation = `En la vida cotidiana, solemos usar "${cleanWord}".`;
+      sentenceTranslation = `En la vida cotidiana, solemos usar esta palabra.`;
     } else if (lang === 'it') {
       fullSentence = `Nella vita quotidiana, usiamo spesso "${cleanWord}".`;
       maskedSentence = `Nella vita quotidiana, usiamo spesso "________".`;
-      sentenceTranslation = `En la vida cotidiana, a menudo usamos "${cleanWord}".`;
+      sentenceTranslation = `En la vida cotidiana, a menudo usamos esta palabra.`;
     } else if (lang === 'pt') {
       fullSentence = `No dia a dia, costumamos usar "${cleanWord}".`;
       maskedSentence = `No dia a dia, costumamos usar "________".`;
-      sentenceTranslation = `En el día a día, solemos usar "${cleanWord}".`;
+      sentenceTranslation = `En el día a día, solemos usar esta palabra.`;
     }
   }
 

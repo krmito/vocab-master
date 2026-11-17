@@ -45,6 +45,8 @@ const STATE = {
   clozeSelectedOption: null,
   clozeFeedback: null,
   clozeShowHint: false,
+  clozeShowTranslation: false,
+  cardChallengeOpen: false,
   productionSentence: '',
   productionFeedback: null,
   productionLoading: false,
@@ -442,6 +444,9 @@ async function loadClozeExercise(wordId) {
   STATE.clozeFeedback = null;
   STATE.clozeSelectedOption = null;
   STATE.clozeShowHint = false;
+  STATE.clozeShowTranslation = false;
+  STATE.productionSentence = '';
+  STATE.productionFeedback = null;
   renderApp();
   try {
     const res = await apiGet(`/api/words/${wordId}/cloze`);
@@ -482,6 +487,16 @@ function submitClozeText(text) {
 
 function toggleClozeHint() {
   STATE.clozeShowHint = true;
+  renderApp();
+}
+
+function toggleClozeTranslation() {
+  STATE.clozeShowTranslation = !STATE.clozeShowTranslation;
+  renderApp();
+}
+
+function toggleCardChallenge() {
+  STATE.cardChallengeOpen = !STATE.cardChallengeOpen;
   renderApp();
 }
 
@@ -538,6 +553,49 @@ function startVoiceSentenceChallenge(word, lang) {
   recognition.start();
 }
 
+function renderProductionChallenge(card, targetWord) {
+  const word = targetWord || card.word;
+  const wordId = card.id;
+
+  return `
+    <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25);padding:14px;border-radius:14px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px;">
+        <div style="font-weight:700;color:#34d399;font-size:0.85rem;text-transform:uppercase;display:flex;align-items:center;gap:6px;">
+          ✏️ El Reto: Redacta una oración propia con "${word}"
+        </div>
+        <button onclick="startVoiceSentenceChallenge('${word.replace(/'/g, "\\'")}', '${card.lang}')" class="btn btn-outline" style="padding:3px 10px;font-size:0.75rem;border-radius:12px;color:#34d399;border-color:rgba(16,185,129,0.4);" title="Dictar frase por voz">
+          🎙️ Dictar por voz
+        </button>
+      </div>
+
+      <form onsubmit="event.preventDefault();submitUserSentence(${wordId}, document.getElementById('userSentenceInput_${wordId}').value);" style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input 
+          type="text" 
+          id="userSentenceInput_${wordId}" 
+          class="input" 
+          placeholder="Escribe una oración completa usando '${word}'..." 
+          value="${STATE.productionSentence || ''}"
+          style="flex:1;min-width:200px;font-size:0.9rem;"
+        >
+        <button type="submit" class="btn btn-primary" style="padding:8px 16px;font-size:0.85rem;background:#10b981;" ${STATE.productionLoading ? 'disabled' : ''}>
+          ${STATE.productionLoading ? '⏳ Verificando...' : 'Validar con IA'}
+        </button>
+      </form>
+
+      ${STATE.productionFeedback ? `
+        <div class="animate-fade-in" style="margin-top:10px;padding:12px 14px;border-radius:12px;background:${STATE.productionFeedback.valid ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'};border:1px solid ${STATE.productionFeedback.valid ? '#10b981' : '#ef4444'};">
+          <div style="font-size:0.9rem;font-weight:700;color:${STATE.productionFeedback.valid ? '#34d399' : '#f87171'};display:flex;align-items:center;gap:6px;">
+            ${STATE.productionFeedback.valid ? '🎉 ¡Excelente!' : '⚠️ Corrección lingüística:'}
+          </div>
+          <div style="font-size:0.88rem;color:white;margin-top:4px;line-height:1.4;">
+            ${STATE.productionFeedback.message}
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
 function renderClozeStudyView(card) {
   if (STATE.clozeLoading) {
     return `
@@ -571,7 +629,7 @@ function renderClozeStudyView(card) {
         <div style="display:flex;align-items:center;gap:8px;">
           <span class="lang-badge ${card.lang}">${card.lang}</span>
           <span style="font-size:0.8rem;font-weight:700;color:#818cf8;background:rgba(99,102,241,0.15);padding:3px 10px;border-radius:999px;">
-            ✍️ Completa la oración
+            ✍️ Completa la oración en contexto
           </span>
         </div>
         <div style="font-size:0.8rem;color:var(--text-muted);">
@@ -581,22 +639,30 @@ function renderClozeStudyView(card) {
 
       <!-- Masked Sentence Prompt -->
       <div class="cloze-sentence-box">
-        <div style="font-size:1.45rem;line-height:1.6;font-weight:600;color:white;">
+        <div class="cloze-sentence-text">
           "${formatMaskedSentence(ex.maskedSentence)}"
         </div>
         ${ex.sentenceTranslation ? `
-          <div style="font-size:0.95rem;color:#94a3b8;margin-top:10px;">
-            ↳ <i>${ex.sentenceTranslation}</i>
+          <div style="margin-top:14px;">
+            ${STATE.clozeShowTranslation ? `
+              <div class="animate-fade-in" style="font-size:0.95rem;color:#cbd5e1;background:rgba(255,255,255,0.06);padding:8px 14px;border-radius:10px;display:inline-block;border:1px solid rgba(255,255,255,0.1);">
+                ↳ <i>${ex.sentenceTranslation}</i>
+              </div>
+            ` : `
+              <button onclick="toggleClozeTranslation()" class="btn btn-outline" style="padding:5px 14px;font-size:0.82rem;border-radius:14px;color:#94a3b8;">
+                👁️ Ver traducción de la frase en español
+              </button>
+            `}
           </div>
         ` : ''}
       </div>
 
-      <!-- Multiple Choice Options (2x2 Grid) -->
+      <!-- Multiple Choice Options (Responsive Grid) -->
       <div style="margin-bottom:20px;">
         <div style="font-size:0.8rem;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:10px;text-align:center;">
           Selecciona la palabra correcta:
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div class="cloze-options-grid">
           ${ex.options.map(opt => {
             let stateClass = '';
             if (isAnswered) {
@@ -622,7 +688,7 @@ function renderClozeStudyView(card) {
       <!-- Direct Text Typing Alternative -->
       ${!isAnswered ? `
         <div style="border-top:1px solid var(--border-subtle);padding-top:16px;margin-bottom:16px;">
-          <form onsubmit="event.preventDefault();submitClozeText(document.getElementById('clozeTypeInput').value);" style="display:flex;gap:8px;max-width:440px;margin:0 auto;">
+          <form onsubmit="event.preventDefault();submitClozeText(document.getElementById('clozeTypeInput').value);" class="cloze-type-form">
             <input 
               type="text" 
               id="clozeTypeInput" 
@@ -644,21 +710,21 @@ function renderClozeStudyView(card) {
           <div style="font-size:1.15rem;font-weight:800;color:${STATE.clozeFeedback.isCorrect ? '#34d399' : '#f87171'};margin-bottom:6px;">
             ${STATE.clozeFeedback.isCorrect ? '🎉 ¡Correcto!' : '❌ Incorrecto'}
           </div>
-          <div style="font-size:0.95rem;color:white;margin-bottom:6px;">
-            La respuesta es: <b style="color:#38bdf8;">${ex.correctAnswer}</b> (${card.translation})
+          <div style="font-size:1.05rem;color:white;margin-bottom:6px;">
+            Palabra correcta: <b style="color:#38bdf8;font-size:1.15rem;">${ex.correctAnswer}</b> (${card.translation})
           </div>
-          <div style="font-size:0.85rem;color:var(--text-muted);display:flex;align-items:center;justify-content:center;gap:6px;">
+          <div style="font-size:0.88rem;color:var(--text-muted);display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:6px;">
             <span>Oración completa: "${ex.fullSentence}"</span>
-            <button onclick="speak('${ex.fullSentence.replace(/'/g, "\\'")}', '${card.lang}')" style="background:none;border:none;cursor:pointer;color:#38bdf8;font-size:1rem;" title="Escuchar frase">🔊</button>
+            <button onclick="speak('${ex.fullSentence.replace(/'/g, "\\'")}', '${card.lang}')" class="btn btn-outline" style="padding:2px 8px;font-size:0.8rem;border-radius:8px;" title="Escuchar frase">🔊 Escuchar</button>
           </div>
         </div>
 
-        <!-- Rating / Next Step -->
-        <div style="display:flex;flex-direction:column;gap:12px;align-items:center;">
+        <!-- Rating / Spaced Repetition Next Card -->
+        <div style="display:flex;flex-direction:column;gap:12px;align-items:center;margin-bottom:24px;">
           <div style="font-size:0.8rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;">
             ¿Cómo te resultó este ejercicio?
           </div>
-          <div style="display:flex;gap:10px;width:100%;max-width:500px;">
+          <div class="cloze-rating-bar">
             <button onclick="advanceClozeNext(1)" class="btn btn-rating again">
               <span>Repetir</span>
               <span class="shortcut">1</span>
@@ -676,6 +742,11 @@ function renderClozeStudyView(card) {
               <span class="shortcut">4</span>
             </button>
           </div>
+        </div>
+
+        <!-- Optional Production Challenge right after answering -->
+        <div style="border-top:1px solid var(--border-subtle);padding-top:18px;">
+          ${renderProductionChallenge(card, ex.correctAnswer)}
         </div>
       ` : `
         <!-- Helper Hints & Actions -->
@@ -737,36 +808,22 @@ function renderUsageAndProductionSection(wikiData, card) {
           </div>
         ` : ''}
 
-        <!-- Interactive Production Challenge: "Escribe tu propia frase" -->
-        <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25);padding:12px 14px;border-radius:12px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-            <div style="font-weight:700;color:#34d399;font-size:0.8rem;text-transform:uppercase;">
-              ✏️ Reto: Formula tu propia oración con "${card.word}"
-            </div>
-            <button onclick="startVoiceSentenceChallenge('${card.word.replace(/'/g, "\\'")}', '${card.lang}')" class="btn btn-outline" style="padding:2px 8px;font-size:0.75rem;border-radius:12px;color:#34d399;" title="Dictar frase por voz">
-              🎙️ Dictar
+        <!-- Collapsible Production Challenge Button on Flashcard -->
+        <div style="margin-top:6px;">
+          ${!STATE.cardChallengeOpen ? `
+            <button onclick="toggleCardChallenge()" class="btn btn-outline" style="width:100%;font-size:0.82rem;padding:7px 12px;border-radius:10px;color:#34d399;border-color:rgba(16,185,129,0.3);background:rgba(16,185,129,0.04);">
+              ✏️ ¿Quieres probarte redactando una frase propia con "${card.word}"?
             </button>
-          </div>
-          
-          <form onsubmit="event.preventDefault();submitUserSentence(${card.id}, document.getElementById('userSentenceInput_${card.id}').value);" style="display:flex;gap:8px;">
-            <input 
-              type="text" 
-              id="userSentenceInput_${card.id}" 
-              class="input" 
-              placeholder="Escribe una frase donde uses '${card.word}'..." 
-              value="${STATE.productionSentence || ''}"
-              style="flex:1;font-size:0.85rem;"
-            >
-            <button type="submit" class="btn btn-primary" style="padding:6px 14px;font-size:0.8rem;background:#10b981;">
-              Validar
-            </button>
-          </form>
-
-          ${STATE.productionFeedback ? `
-            <div class="animate-fade-in" style="margin-top:8px;font-size:0.85rem;color:${STATE.productionFeedback.valid ? '#34d399' : '#f87171'};font-weight:600;">
-              ${STATE.productionFeedback.valid ? '✅' : '⚠️'} ${STATE.productionFeedback.message}
+          ` : `
+            <div>
+              <div style="display:flex;justify-content:flex-end;margin-bottom:4px;">
+                <button onclick="toggleCardChallenge()" style="background:none;border:none;color:var(--text-dim);font-size:0.75rem;cursor:pointer;">
+                  ✕ Ocultar reto
+                </button>
+              </div>
+              ${renderProductionChallenge(card, card.word)}
             </div>
-          ` : ''}
+          `}
         </div>
       </div>
     </div>
@@ -1242,10 +1299,40 @@ function renderStudy() {
           `}
         </div>
 
+        <!-- Study Mode Selector Box -->
+        <div class="glass" style="padding:18px 24px;border-radius:18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;border:1px solid rgba(129,140,248,0.25);">
+          <div>
+            <div style="font-size:0.95rem;font-weight:700;color:white;display:flex;align-items:center;gap:6px;">
+              2️⃣ Modo de Repaso:
+            </div>
+            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px;">
+              ${STATE.studyViewMode === 'cloze' 
+                ? '✍️ Ejercicios en Contexto: Se oculta la palabra y la deduces de oraciones reales (evaluación activa)' 
+                : '🗂️ Tarjetas Clásicas: Repasa anverso y reverso con pronunciación, gramática y sinónimos'}
+            </div>
+          </div>
+          <div style="display:inline-flex;gap:6px;background:rgba(0,0,0,0.35);padding:4px;border-radius:12px;border:1px solid var(--border-subtle);">
+            <button 
+              class="btn ${STATE.studyViewMode === 'card' ? 'btn-primary' : 'btn-outline'}" 
+              style="padding:6px 14px;font-size:0.85rem;border-radius:8px;" 
+              onclick="setStudyViewMode('card')"
+            >
+              🗂️ Tarjetas Clásicas
+            </button>
+            <button 
+              class="btn ${STATE.studyViewMode === 'cloze' ? 'btn-primary' : 'btn-outline'}" 
+              style="padding:6px 14px;font-size:0.85rem;border-radius:8px;" 
+              onclick="setStudyViewMode('cloze')"
+            >
+              ✍️ Ejercicios en Contexto (Cloze)
+            </button>
+          </div>
+        </div>
+
         <!-- Languages Selection Grid -->
         <div>
           <h3 style="font-size:1rem;font-weight:700;margin-bottom:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;">
-            2️⃣ Elige el Idioma para comenzar (${STUDY_FILTERS.find(f => f.id === STATE.studyFilter)?.label || 'Pendientes'})
+            3️⃣ Elige el Idioma para comenzar (${STUDY_FILTERS.find(f => f.id === STATE.studyFilter)?.label || 'Pendientes'})
           </h3>
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;">
             <!-- All Languages Card -->
@@ -1907,6 +1994,8 @@ async function submitRating(wordId, rating) {
     STATE.clozeFeedback = null;
     STATE.clozeSelectedOption = null;
     STATE.clozeShowHint = false;
+    STATE.clozeShowTranslation = false;
+    STATE.cardChallengeOpen = false;
     STATE.productionSentence = '';
     STATE.productionFeedback = null;
     loadStats();
@@ -2914,6 +3003,8 @@ window.loadClozeExercise = loadClozeExercise;
 window.submitClozeOption = submitClozeOption;
 window.submitClozeText = submitClozeText;
 window.toggleClozeHint = toggleClozeHint;
+window.toggleClozeTranslation = toggleClozeTranslation;
+window.toggleCardChallenge = toggleCardChallenge;
 window.advanceClozeNext = advanceClozeNext;
 window.submitUserSentence = submitUserSentence;
 window.startVoiceSentenceChallenge = startVoiceSentenceChallenge;

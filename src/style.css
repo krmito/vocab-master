@@ -451,6 +451,13 @@ nav {
   box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
+.cloze-sentence-text {
+  font-size: 1.4rem;
+  line-height: 1.6;
+  font-weight: 600;
+  color: white;
+}
+
 .cloze-blank-highlight {
   display: inline-block;
   padding: 2px 14px;
@@ -459,6 +466,26 @@ nav {
   font-weight: 800;
   letter-spacing: 0.05em;
   font-family: var(--font-mono);
+}
+
+.cloze-options-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.cloze-type-form {
+  display: flex;
+  gap: 8px;
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.cloze-rating-bar {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  max-width: 500px;
 }
 
 .cloze-option-btn {
@@ -501,4 +528,102 @@ nav {
   border: 1px solid rgba(99, 102, 241, 0.25);
   border-radius: 14px;
   padding: 18px;
+}
+
+/* Mobile Responsive Optimizations */
+@media (max-width: 640px) {
+  .container {
+    padding: 0 12px;
+  }
+
+  nav {
+    padding: 8px 12px;
+  }
+  
+  .nav-link {
+    padding: 6px 10px;
+    font-size: 0.85rem;
+  }
+
+  /* Flashcard & Cloze Cards */
+  .cloze-card {
+    padding: 20px 14px;
+    border-radius: 16px;
+  }
+
+  .cloze-sentence-box {
+    padding: 16px 12px;
+    margin: 12px 0;
+  }
+
+  .cloze-sentence-text {
+    font-size: 1.15rem;
+    line-height: 1.5;
+  }
+
+  .cloze-blank-highlight {
+    padding: 1px 8px;
+    font-size: 0.95rem;
+  }
+
+  .cloze-options-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .cloze-option-btn {
+    padding: 13px 16px;
+    font-size: 0.95rem;
+    min-height: 48px;
+    width: 100%;
+  }
+
+  .cloze-type-form {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .cloze-rating-bar {
+    gap: 6px;
+  }
+
+  .btn-rating {
+    padding: 10px 4px;
+    font-size: 0.82rem;
+  }
+
+  .btn-rating span.shortcut {
+    display: none;
+  }
+
+  /* Image Container & Lightbox */
+  .word-image-card {
+    min-height: 140px;
+    max-height: 200px;
+  }
+
+  .lightbox-modal {
+    max-width: 96vw;
+    max-height: 94vh;
+    padding: 8px;
+  }
+
+  .lightbox-img {
+    max-width: 94vw;
+    max-height: 60vh;
+  }
+
+  .lightbox-bar {
+    flex-direction: column;
+    gap: 8px;
+    align-items: stretch;
+    border-radius: 14px;
+    padding: 10px 12px;
+  }
+
+  .lightbox-actions {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+  }
 }
