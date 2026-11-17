@@ -39,6 +39,15 @@ const STATE = {
   modalImage: null,
   lightbox: null,
   revealedSynonymHint: false,
+  studyViewMode: localStorage.getItem('vocab_study_mode') || 'card', // 'card' or 'cloze'
+  clozeExercise: null,
+  clozeLoading: false,
+  clozeSelectedOption: null,
+  clozeFeedback: null,
+  clozeShowHint: false,
+  productionSentence: '',
+  productionFeedback: null,
+  productionLoading: false,
   settings: null,
   notification: null
 };
@@ -412,6 +421,358 @@ async function toggleSynonymHint() {
   renderApp();
 }
 
+function formatMaskedSentence(sentence) {
+  if (!sentence) return '';
+  return sentence.replace(/________/g, '<span class="cloze-blank-highlight">________</span>');
+}
+
+function setStudyViewMode(mode) {
+  STATE.studyViewMode = mode;
+  localStorage.setItem('vocab_study_mode', mode);
+  const card = STATE.studyCards[STATE.currentCardIndex];
+  if (mode === 'cloze' && card) {
+    loadClozeExercise(card.id);
+  }
+  renderApp();
+}
+
+async function loadClozeExercise(wordId) {
+  if (!wordId) return;
+  STATE.clozeLoading = true;
+  STATE.clozeFeedback = null;
+  STATE.clozeSelectedOption = null;
+  STATE.clozeShowHint = false;
+  renderApp();
+  try {
+    const res = await apiGet(`/api/words/${wordId}/cloze`);
+    if (res && res.success) {
+      STATE.clozeExercise = res;
+    }
+  } catch (err) {
+    console.error('Error loading cloze exercise:', err);
+  } finally {
+    STATE.clozeLoading = false;
+    renderApp();
+  }
+}
+
+function submitClozeOption(opt) {
+  if (STATE.clozeFeedback || !STATE.clozeExercise) return;
+  STATE.clozeSelectedOption = opt;
+  const isCorrect = opt.trim().toLowerCase() === STATE.clozeExercise.correctAnswer.trim().toLowerCase();
+  STATE.clozeFeedback = {
+    isCorrect,
+    message: isCorrect ? '¡Correcto!' : 'Incorrecto'
+  };
+  renderApp();
+}
+
+function submitClozeText(text) {
+  if (STATE.clozeFeedback || !text || !STATE.clozeExercise) return;
+  const cleanInput = text.trim().toLowerCase();
+  const cleanAns = STATE.clozeExercise.correctAnswer.trim().toLowerCase();
+  const isCorrect = cleanInput === cleanAns || cleanInput === STATE.clozeExercise.word.toLowerCase();
+  STATE.clozeSelectedOption = text;
+  STATE.clozeFeedback = {
+    isCorrect,
+    message: isCorrect ? '¡Correcto!' : 'Incorrecto'
+  };
+  renderApp();
+}
+
+function toggleClozeHint() {
+  STATE.clozeShowHint = true;
+  renderApp();
+}
+
+async function advanceClozeNext(rating = 3) {
+  const card = STATE.studyCards[STATE.currentCardIndex];
+  if (card) {
+    await submitRating(card.id, rating);
+  }
+}
+
+async function submitUserSentence(wordId, sentence) {
+  if (!sentence || !sentence.trim()) return;
+  STATE.productionLoading = true;
+  renderApp();
+  try {
+    const res = await apiPost(`/api/words/${wordId}/validate-sentence`, { sentence });
+    STATE.productionSentence = sentence;
+    STATE.productionFeedback = res;
+  } catch (err) {
+    notify('Error al validar la oración', 'error');
+  } finally {
+    STATE.productionLoading = false;
+    renderApp();
+  }
+}
+
+function startVoiceSentenceChallenge(word, lang) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    notify('Tu navegador no soporta reconocimiento de voz nativo.', 'error');
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.lang = LANGS[lang]?.code || 'en-US';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  notify('Habla ahora tu oración...', 'info');
+
+  recognition.onresult = (event) => {
+    const spoken = event.results[0][0].transcript;
+    STATE.productionSentence = spoken;
+    const card = STATE.studyCards[STATE.currentCardIndex];
+    if (card) {
+      submitUserSentence(card.id, spoken);
+    }
+  };
+
+  recognition.onerror = () => {
+    notify('No se pudo capturar el audio del micrófono.', 'error');
+  };
+
+  recognition.start();
+}
+
+function renderClozeStudyView(card) {
+  if (STATE.clozeLoading) {
+    return `
+      <div class="glass" style="padding:60px 30px;text-align:center;">
+        <div style="font-size:2rem;margin-bottom:12px;">⏳</div>
+        <div style="font-size:1.2rem;font-weight:700;">Generando ejercicio en contexto...</div>
+        <div style="font-size:0.85rem;color:var(--text-muted);margin-top:6px;">Extrayendo oraciones reales y opciones de vocabulario</div>
+      </div>
+    `;
+  }
+
+  const ex = STATE.clozeExercise;
+  if (!ex) {
+    return `
+      <div class="glass" style="padding:50px 30px;text-align:center;">
+        <div style="font-size:1.1rem;color:var(--text-muted);margin-bottom:16px;">No se pudo cargar el ejercicio para esta palabra.</div>
+        <div style="display:flex;justify-content:center;gap:10px;">
+          <button class="btn btn-primary" onclick="loadClozeExercise(${card.id})">🔄 Reintentar</button>
+          <button class="btn btn-outline" onclick="setStudyViewMode('card')">🗂️ Ver en Tarjeta Clásica</button>
+        </div>
+      </div>
+    `;
+  }
+
+  const isAnswered = Boolean(STATE.clozeFeedback);
+
+  return `
+    <div class="cloze-card animate-fade-in">
+      <!-- Exercise Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="lang-badge ${card.lang}">${card.lang}</span>
+          <span style="font-size:0.8rem;font-weight:700;color:#818cf8;background:rgba(99,102,241,0.15);padding:3px 10px;border-radius:999px;">
+            ✍️ Completa la oración
+          </span>
+        </div>
+        <div style="font-size:0.8rem;color:var(--text-muted);">
+          Tarjeta ${STATE.currentCardIndex + 1} de ${STATE.studyCards.length}
+        </div>
+      </div>
+
+      <!-- Masked Sentence Prompt -->
+      <div class="cloze-sentence-box">
+        <div style="font-size:1.45rem;line-height:1.6;font-weight:600;color:white;">
+          "${formatMaskedSentence(ex.maskedSentence)}"
+        </div>
+        ${ex.sentenceTranslation ? `
+          <div style="font-size:0.95rem;color:#94a3b8;margin-top:10px;">
+            ↳ <i>${ex.sentenceTranslation}</i>
+          </div>
+        ` : ''}
+      </div>
+
+      <!-- Multiple Choice Options (2x2 Grid) -->
+      <div style="margin-bottom:20px;">
+        <div style="font-size:0.8rem;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:10px;text-align:center;">
+          Selecciona la palabra correcta:
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          ${ex.options.map(opt => {
+            let stateClass = '';
+            if (isAnswered) {
+              if (opt.toLowerCase() === ex.correctAnswer.toLowerCase()) {
+                stateClass = 'correct';
+              } else if (STATE.clozeSelectedOption && STATE.clozeSelectedOption.toLowerCase() === opt.toLowerCase()) {
+                stateClass = 'incorrect';
+              }
+            }
+            return `
+              <button 
+                onclick="submitClozeOption('${opt.replace(/'/g, "\\'")}')" 
+                class="cloze-option-btn ${stateClass}" 
+                ${isAnswered ? 'disabled' : ''}
+              >
+                ${opt}
+              </button>
+            `;
+          }).join('')}
+        </div>
+      </div>
+
+      <!-- Direct Text Typing Alternative -->
+      ${!isAnswered ? `
+        <div style="border-top:1px solid var(--border-subtle);padding-top:16px;margin-bottom:16px;">
+          <form onsubmit="event.preventDefault();submitClozeText(document.getElementById('clozeTypeInput').value);" style="display:flex;gap:8px;max-width:440px;margin:0 auto;">
+            <input 
+              type="text" 
+              id="clozeTypeInput" 
+              class="input" 
+              placeholder="O teclea la palabra exacta..." 
+              autocomplete="off" 
+              style="flex:1;font-size:0.95rem;"
+            >
+            <button type="submit" class="btn btn-secondary" style="padding:8px 16px;">
+              Comprobar
+            </button>
+          </form>
+        </div>
+      ` : ''}
+
+      <!-- Feedback Area -->
+      ${STATE.clozeFeedback ? `
+        <div class="animate-fade-in" style="background:${STATE.clozeFeedback.isCorrect ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'};border:1px solid ${STATE.clozeFeedback.isCorrect ? '#10b981' : '#ef4444'};border-radius:14px;padding:16px;margin-bottom:20px;text-align:center;">
+          <div style="font-size:1.15rem;font-weight:800;color:${STATE.clozeFeedback.isCorrect ? '#34d399' : '#f87171'};margin-bottom:6px;">
+            ${STATE.clozeFeedback.isCorrect ? '🎉 ¡Correcto!' : '❌ Incorrecto'}
+          </div>
+          <div style="font-size:0.95rem;color:white;margin-bottom:6px;">
+            La respuesta es: <b style="color:#38bdf8;">${ex.correctAnswer}</b> (${card.translation})
+          </div>
+          <div style="font-size:0.85rem;color:var(--text-muted);display:flex;align-items:center;justify-content:center;gap:6px;">
+            <span>Oración completa: "${ex.fullSentence}"</span>
+            <button onclick="speak('${ex.fullSentence.replace(/'/g, "\\'")}', '${card.lang}')" style="background:none;border:none;cursor:pointer;color:#38bdf8;font-size:1rem;" title="Escuchar frase">🔊</button>
+          </div>
+        </div>
+
+        <!-- Rating / Next Step -->
+        <div style="display:flex;flex-direction:column;gap:12px;align-items:center;">
+          <div style="font-size:0.8rem;color:var(--text-dim);font-weight:700;text-transform:uppercase;">
+            ¿Cómo te resultó este ejercicio?
+          </div>
+          <div style="display:flex;gap:10px;width:100%;max-width:500px;">
+            <button onclick="advanceClozeNext(1)" class="btn btn-rating again">
+              <span>Repetir</span>
+              <span class="shortcut">1</span>
+            </button>
+            <button onclick="advanceClozeNext(2)" class="btn btn-rating hard">
+              <span>Difícil</span>
+              <span class="shortcut">2</span>
+            </button>
+            <button onclick="advanceClozeNext(3)" class="btn btn-rating good">
+              <span>Bien</span>
+              <span class="shortcut">3</span>
+            </button>
+            <button onclick="advanceClozeNext(4)" class="btn btn-rating easy">
+              <span>Fácil</span>
+              <span class="shortcut">4</span>
+            </button>
+          </div>
+        </div>
+      ` : `
+        <!-- Helper Hints & Actions -->
+        <div style="display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;">
+          ${STATE.clozeShowHint ? `
+            <div class="animate-fade-in" style="background:rgba(245,158,11,0.12);border:1px dashed rgba(245,158,11,0.4);padding:6px 14px;border-radius:999px;font-size:0.85rem;color:#fbbf24;">
+              💡 Pista: <b>${ex.hint}</b> · Significado: <b>${card.translation.split(';')[0]}</b>
+            </div>
+          ` : `
+            <button onclick="toggleClozeHint()" class="btn btn-outline" style="padding:6px 14px;font-size:0.85rem;border-radius:20px;">
+              💡 Ver Pista
+            </button>
+          `}
+          <button onclick="speak('${ex.fullSentence.replace(/'/g, "\\'")}', '${card.lang}')" class="btn btn-outline" style="padding:6px 14px;font-size:0.85rem;border-radius:20px;">
+            🔊 Escuchar Frase
+          </button>
+          <button onclick="submitClozeOption('${ex.correctAnswer.replace(/'/g, "\\'")}')" class="btn btn-outline" style="padding:6px 14px;font-size:0.85rem;border-radius:20px;color:var(--text-dim);">
+            👁️ Revelar Respuesta
+          </button>
+        </div>
+      `}
+    </div>
+  `;
+}
+
+function renderUsageAndProductionSection(wikiData, card) {
+  const usageNotes = wikiData?.usageNotes || [];
+  const partsOfSpeech = wikiData?.partsOfSpeech || [];
+
+  return `
+    <div class="usage-guide-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <span style="font-size:0.8rem;font-weight:800;color:#818cf8;text-transform:uppercase;letter-spacing:0.05em;display:flex;align-items:center;gap:6px;">
+          📘 ¿Cuándo y Cómo Usarla? (Colocaciones y Matiz)
+        </span>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px;font-size:0.88rem;color:var(--text-main);">
+        <!-- Part of Speech & Functional Role -->
+        <div style="background:rgba(255,255,255,0.03);padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.06);">
+          <div style="font-weight:700;color:#a5b4fc;font-size:0.8rem;text-transform:uppercase;margin-bottom:3px;">
+            Rol sintáctico y categoría:
+          </div>
+          <div>
+            ${partsOfSpeech.length ? `Clasificada como <b>${partsOfSpeech.join(', ')}</b>.` : `Forma estándar en ${LANGS[card.lang]?.name || card.lang}.`}
+            ${card.tags ? ` · Etiquetas: <span class="glass-pill" style="font-size:0.75rem;">${card.tags}</span>` : ''}
+          </div>
+        </div>
+
+        <!-- Wiktionary Usage Notes if available -->
+        ${usageNotes.length > 0 ? `
+          <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);padding:10px 14px;border-radius:10px;">
+            <div style="font-weight:700;color:#fbbf24;font-size:0.8rem;text-transform:uppercase;margin-bottom:4px;">
+              ⚠️ Advertencias de uso y diferencias:
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              ${usageNotes.map(n => `<div>• ${n}</div>`).join('')}
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- Interactive Production Challenge: "Escribe tu propia frase" -->
+        <div style="background:rgba(16,185,129,0.06);border:1px solid rgba(16,185,129,0.25);padding:12px 14px;border-radius:12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <div style="font-weight:700;color:#34d399;font-size:0.8rem;text-transform:uppercase;">
+              ✏️ Reto: Formula tu propia oración con "${card.word}"
+            </div>
+            <button onclick="startVoiceSentenceChallenge('${card.word.replace(/'/g, "\\'")}', '${card.lang}')" class="btn btn-outline" style="padding:2px 8px;font-size:0.75rem;border-radius:12px;color:#34d399;" title="Dictar frase por voz">
+              🎙️ Dictar
+            </button>
+          </div>
+          
+          <form onsubmit="event.preventDefault();submitUserSentence(${card.id}, document.getElementById('userSentenceInput_${card.id}').value);" style="display:flex;gap:8px;">
+            <input 
+              type="text" 
+              id="userSentenceInput_${card.id}" 
+              class="input" 
+              placeholder="Escribe una frase donde uses '${card.word}'..." 
+              value="${STATE.productionSentence || ''}"
+              style="flex:1;font-size:0.85rem;"
+            >
+            <button type="submit" class="btn btn-primary" style="padding:6px 14px;font-size:0.8rem;background:#10b981;">
+              Validar
+            </button>
+          </form>
+
+          ${STATE.productionFeedback ? `
+            <div class="animate-fade-in" style="margin-top:8px;font-size:0.85rem;color:${STATE.productionFeedback.valid ? '#34d399' : '#f87171'};font-weight:600;">
+              ${STATE.productionFeedback.valid ? '✅' : '⚠️'} ${STATE.productionFeedback.message}
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // Notification toast helper
 function notify(msg, type = 'info') {
   STATE.notification = { msg, type };
@@ -752,8 +1113,9 @@ async function startStudySession(lang = STATE.studyLang || 'all', tag = STATE.st
     const res = await apiGet(`/api/study/due?${params.toString()}`);
     if (res.success) {
       STATE.studyCards = res.cards;
-      if (res.cards.length > 0 && STATE.showImage) {
-        loadCardImage(res.cards[0].id);
+      if (res.cards.length > 0) {
+        if (STATE.showImage) loadCardImage(res.cards[0].id);
+        if (STATE.studyViewMode === 'cloze') loadClozeExercise(res.cards[0].id);
       }
     }
   } catch (err) {
@@ -1004,7 +1366,27 @@ function renderStudy() {
         </div>
       </div>
 
-      <!-- Main Study Card -->
+      <!-- Study Mode Switcher: Clásico vs Ejercicios en Contexto (Cloze) -->
+      <div style="display:flex;align-items:center;justify-content:center;margin:2px 0 10px 0;">
+        <div style="background:rgba(0,0,0,0.45);padding:4px;border-radius:14px;border:1px solid var(--border-subtle);display:inline-flex;gap:4px;">
+          <button 
+            onclick="setStudyViewMode('card')" 
+            class="btn ${STATE.studyViewMode === 'card' ? 'btn-primary' : 'btn-outline'}" 
+            style="padding:6px 16px;font-size:0.85rem;border-radius:10px;"
+          >
+            🗂️ Tarjeta Clásica
+          </button>
+          <button 
+            onclick="setStudyViewMode('cloze')" 
+            class="btn ${STATE.studyViewMode === 'cloze' ? 'btn-primary' : 'btn-outline'}" 
+            style="padding:6px 16px;font-size:0.85rem;border-radius:10px;"
+          >
+            ✍️ Ejercicio en Contexto (Cloze)
+          </button>
+        </div>
+      </div>
+
+      <!-- Main Study Card / Cloze View -->
       ${!card ? `
         <div class="glass" style="padding:50px 30px;text-align:center;">
           <div style="font-size:3rem;margin-bottom:12px;">🎉</div>
@@ -1022,7 +1404,7 @@ function renderStudy() {
             <button class="btn btn-secondary" onclick="window.location.hash='words'">📖 Elegir palabras en el Diccionario</button>
           </div>
         </div>
-      ` : `
+      ` : STATE.studyViewMode === 'cloze' ? renderClozeStudyView(card) : `
         <div class="glass" style="padding:36px;border-radius:24px;box-shadow:0 20px 40px -10px rgba(0,0,0,0.5);display:flex;flex-direction:column;gap:24px;">
           <!-- Card Top Bar -->
           <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
@@ -1223,6 +1605,9 @@ function renderStudy() {
                   </div>
                 `}
               </div>
+
+              <!-- Usage & Production Challenge Section -->
+              ${renderUsageAndProductionSection(STATE.wikiData, card)}
 
               <!-- Rating Buttons (Spaced Repetition SM-2/FSRS) -->
               <div>
@@ -1518,12 +1903,19 @@ async function submitRating(wordId, rating) {
     STATE.showConjugations = false;
     STATE.cardImage = null;
     STATE.revealedSynonymHint = false;
+    STATE.clozeExercise = null;
+    STATE.clozeFeedback = null;
+    STATE.clozeSelectedOption = null;
+    STATE.clozeShowHint = false;
+    STATE.productionSentence = '';
+    STATE.productionFeedback = null;
     loadStats();
     renderApp();
 
     const nextCard = STATE.studyCards[STATE.currentCardIndex];
-    if (nextCard && STATE.showImage) {
-      loadCardImage(nextCard.id);
+    if (nextCard) {
+      if (STATE.showImage) loadCardImage(nextCard.id);
+      if (STATE.studyViewMode === 'cloze') loadClozeExercise(nextCard.id);
     }
   } catch (err) {
     notify('Error guardando calificación', 'error');
@@ -1975,6 +2367,11 @@ function renderWordModal() {
             </button>
           </div>
         `}
+
+        <!-- Usage & Production Challenge Section -->
+        <div style="margin-top:20px;">
+          ${renderUsageAndProductionSection(STATE.wikiData, w)}
+        </div>
       </div>
     </div>
   `;
@@ -2512,6 +2909,14 @@ window.closeImageLightbox = closeImageLightbox;
 window.toggleLightboxZoom = toggleLightboxZoom;
 window.refreshWordSynonyms = refreshWordSynonyms;
 window.toggleSynonymHint = toggleSynonymHint;
+window.setStudyViewMode = setStudyViewMode;
+window.loadClozeExercise = loadClozeExercise;
+window.submitClozeOption = submitClozeOption;
+window.submitClozeText = submitClozeText;
+window.toggleClozeHint = toggleClozeHint;
+window.advanceClozeNext = advanceClozeNext;
+window.submitUserSentence = submitUserSentence;
+window.startVoiceSentenceChallenge = startVoiceSentenceChallenge;
 window.autoDetectTelegramChatId = autoDetectTelegramChatId;
 window.testRemindersNow = testRemindersNow;
 

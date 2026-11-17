@@ -14,6 +14,7 @@ import { importExcelFromFile, importExcelFromBuffer } from './excel.js';
 import { calculateNextReview } from './srs.js';
 import { lookupWord } from './wiktionary.js';
 import { getSynonyms, cleanWordForLookup } from './synonyms.js';
+import { generateClozeExercise } from './cloze.js';
 import { getWordImage, searchImageCandidates, setWordImage, clearImageCache } from './images.js';
 import { checkAndSyncDrive, setupDriveWatch, getServiceAccountEmail, sanitizeDriveFolderId } from './drive.js';
 import { syncDailyCalendarEvent, getCalendarId } from './calendar.js';
@@ -424,6 +425,70 @@ app.post('/api/words/:id/synonyms/refresh', async (req, res) => {
       word,
       lang,
       synonyms
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5a-2. Cloze Exercise (Completar Oración en Contexto)
+app.get('/api/words/:id/cloze', async (req, res) => {
+  try {
+    const wordId = req.params.id;
+    const clozeData = await generateClozeExercise(wordId);
+    if (!clozeData.success) {
+      return res.status(404).json(clozeData);
+    }
+    res.json(clozeData);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// 5a-3. Validate User's Original Sentence (Reto de Producción)
+app.post('/api/words/:id/validate-sentence', async (req, res) => {
+  try {
+    const wordId = req.params.id;
+    const { sentence } = req.body;
+    if (!sentence || typeof sentence !== 'string') {
+      return res.status(400).json({ success: false, error: 'Debes ingresar una oración.' });
+    }
+
+    const words = await query('SELECT lang, word FROM words WHERE id = ?', [wordId]);
+    if (!words || words.length === 0) {
+      return res.status(404).json({ success: false, error: 'Palabra no encontrada' });
+    }
+
+    const { lang, word } = words[0];
+    const cleanWord = cleanWordForLookup(lang, word).toLowerCase();
+    const cleanSentence = sentence.trim();
+    const wordCount = cleanSentence.split(/\s+/).filter(Boolean).length;
+
+    if (wordCount < 3) {
+      return res.json({
+        success: true,
+        valid: false,
+        message: 'Tu oración es demasiado corta. Intenta crear una frase con sujeto y contexto (al menos 3 o 4 palabras).'
+      });
+    }
+
+    // Check if sentence contains the word or its stem
+    const regex = new RegExp(`\\b${cleanWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:[a-zA-Z]{0,4})?\\b`, 'i');
+    const hasWord = regex.test(cleanSentence);
+
+    if (!hasWord) {
+      return res.json({
+        success: true,
+        valid: false,
+        message: `No detectamos la palabra "${word}" en tu oración. Asegúrate de incluirla.`
+      });
+    }
+
+    res.json({
+      success: true,
+      valid: true,
+      message: `¡Excelente trabajo! Has usado "${word}" en una oración completa.`,
+      sentence: cleanSentence
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

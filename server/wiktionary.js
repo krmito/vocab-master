@@ -180,5 +180,22 @@ function parseWikitext(text, langSection, originalWord) {
     result.lemma = originalWord; // It is already a base/lemma form
   }
 
+  // Extract Usage Notes (cuándo usarla, advertencias y diferencias)
+  const usageMatch = sectionText.match(/====?\s*(?:Usage notes?|Notas de uso|Remarques?|Anmerkung(?:en)?)\s*====?([\s\S]*?)(?=\n===|\n==|$)/i);
+  if (usageMatch) {
+    const rawNotes = usageMatch[1]
+      .replace(/\{\{[^}]+\}\}/g, '')
+      .replace(/\[\[(?:[^|\]]*\|)?([^\]]+)\]\]/g, '$1')
+      .replace(/'''?/g, '')
+      .trim();
+    if (rawNotes) {
+      result.usageNotes = rawNotes
+        .split('\n')
+        .map(l => l.replace(/^[*#]\s*/, '').trim())
+        .filter(l => l.length > 5)
+        .slice(0, 3);
+    }
+  }
+
   return result;
 }
